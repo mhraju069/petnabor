@@ -248,22 +248,34 @@ def create_tip_payment_intent(
         pass
 
     if has_verified_account:
-        intent = s.PaymentIntent.create(
-            amount=amount_cents,
-            currency="usd",
-            application_fee_amount=commission_cents,
-            transfer_data={"destination": connect.stripe_account_id},
-            metadata={
-                "tipper_id": str(tipper.id),
-                "recipient_id": str(recipient.id),
-                "meeting_id": str(meeting.id) if meeting else "",
-                "flow": "direct",
-            },
-            automatic_payment_methods={"enabled": True},
-        )
-        tip_status = TipStatus.PENDING
+        try:
+            intent = s.PaymentIntent.create(
+                amount=amount_cents,
+                currency="usd",
+                application_fee_amount=commission_cents,
+                transfer_data={"destination": connect.stripe_account_id},
+                metadata={
+                    "tipper_id": str(tipper.id),
+                    "recipient_id": str(recipient.id),
+                    "meeting_id": str(meeting.id) if meeting else "",
+                    "flow": "direct",
+                },
+                automatic_payment_methods={"enabled": True},
+            )
+            tip_status = TipStatus.PENDING
+        except stripe.error.InvalidRequestError as exc:
+            if "no such destination" in str(exc).lower() or "platform" in str(exc).lower() or "does not exist" in str(exc).lower():
+                logger.warning("Recipient Stripe Connect account %s invalid. Auto-deleting and falling back to HELD.", connect.stripe_account_id)
+                connect.delete()
+                has_verified_account = False
+            else:
+                raise
+        except stripe.error.PermissionError as exc:
+            logger.warning("Recipient Stripe Connect account %s permission denied. Auto-deleting and falling back to HELD.", connect.stripe_account_id)
+            connect.delete()
+            has_verified_account = False
 
-    else:
+    if not has_verified_account:
         intent = s.PaymentIntent.create(
             amount=amount_cents,
             currency="usd",
@@ -277,6 +289,7 @@ def create_tip_payment_intent(
             automatic_payment_methods={"enabled": True},
         )
         tip_status = TipStatus.HELD
+
     tip = Tip.objects.create(
         tipper=tipper,
         recipient=recipient,
