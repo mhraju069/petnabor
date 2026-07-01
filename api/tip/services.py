@@ -213,7 +213,7 @@ def calculate_commission(amount: Decimal, commission_percentage: Decimal):
 
 
 def create_tip_payment_intent(
-    tipper, recipient, amount: Decimal, meeting=None, note=""
+    tipper, recipient, amount: Decimal, meeting=None, note="", idempotency_key=None
 ):
     """
     Create a Stripe PaymentIntent for a tip.
@@ -247,21 +247,25 @@ def create_tip_payment_intent(
     except StripeConnectAccount.DoesNotExist:
         pass
 
+    intent_kwargs = {
+        "amount": amount_cents,
+        "currency": "usd",
+        "automatic_payment_methods": {"enabled": True},
+        "metadata": {
+            "tipper_id": str(tipper.id),
+            "recipient_id": str(recipient.id),
+            "meeting_id": str(meeting.id) if meeting else "",
+        }
+    }
+    if idempotency_key:
+        intent_kwargs["idempotency_key"] = f"tip_intent_{idempotency_key}"
+
     if has_verified_account:
         try:
-            intent = s.PaymentIntent.create(
-                amount=amount_cents,
-                currency="usd",
-                application_fee_amount=commission_cents,
-                transfer_data={"destination": connect.stripe_account_id},
-                metadata={
-                    "tipper_id": str(tipper.id),
-                    "recipient_id": str(recipient.id),
-                    "meeting_id": str(meeting.id) if meeting else "",
-                    "flow": "direct",
-                },
-                automatic_payment_methods={"enabled": True},
-            )
+            intent_kwargs["application_fee_amount"] = commission_cents
+            intent_kwargs["transfer_data"] = {"destination": connect.stripe_account_id}
+            intent_kwargs["metadata"]["flow"] = "direct"
+            intent = s.PaymentIntent.create(**intent_kwargs)
             tip_status = TipStatus.PENDING
         except stripe.error.InvalidRequestError as exc:
             if "no such destination" in str(exc).lower() or "platform" in str(exc).lower() or "does not exist" in str(exc).lower():
@@ -276,32 +280,29 @@ def create_tip_payment_intent(
             has_verified_account = False
 
     if not has_verified_account:
-        intent = s.PaymentIntent.create(
-            amount=amount_cents,
-            currency="usd",
-            # No transfer_data — money stays on platform until recipient connects
-            metadata={
-                "tipper_id": str(tipper.id),
-                "recipient_id": str(recipient.id),
-                "meeting_id": str(meeting.id) if meeting else "",
-                "flow": "held",
-            },
-            automatic_payment_methods={"enabled": True},
-        )
+        # If fallback happened, idempotency key stays the same for Stripe.
+        # But we remove transfer_data.
+        intent_kwargs.pop("application_fee_amount", None)
+        intent_kwargs.pop("transfer_data", None)
+        intent_kwargs["metadata"]["flow"] = "held"
+        
+        intent = s.PaymentIntent.create(**intent_kwargs)
         tip_status = TipStatus.HELD
 
-    tip = Tip.objects.create(
-        tipper=tipper,
-        recipient=recipient,
-        meeting=meeting,
-        amount=amount,
-        commission_percentage=commission_pct,
-        commission_amount=commission_amount,
-        recipient_amount=recipient_amount,
+    tip, created = Tip.objects.get_or_create(
         stripe_payment_intent_id=intent.id,
-        status=tip_status,
-        note=note,
-        currency="usd",
+        defaults={
+            "tipper": tipper,
+            "recipient": recipient,
+            "meeting": meeting,
+            "amount": amount,
+            "commission_percentage": commission_pct,
+            "commission_amount": commission_amount,
+            "recipient_amount": recipient_amount,
+            "status": tip_status,
+            "note": note,
+            "currency": "usd",
+        }
     )
 
     return tip, intent.client_secret

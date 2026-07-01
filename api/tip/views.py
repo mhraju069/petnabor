@@ -176,6 +176,7 @@ class SendTipView(APIView):
         meeting_id = data.get("meeting_id")
         amount = data["amount"]
         note = data.get("note", "")
+        idempotency_key = data.get("idempotency_key")
 
         # Self-tip guard
         if str(request.user.id) == str(recipient_id):
@@ -223,6 +224,7 @@ class SendTipView(APIView):
                 amount=amount,
                 meeting=meeting,
                 note=note,
+                idempotency_key=str(idempotency_key) if idempotency_key else None,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

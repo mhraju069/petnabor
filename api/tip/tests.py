@@ -335,6 +335,44 @@ class SendTipTests(TestCase):
         self.assertEqual(tip.status, TipStatus.PENDING)
 
     @patch("api.tip.services._stripe")
+    def test_send_tip_idempotency(self, mock_stripe):
+        mock_s = MagicMock()
+        mock_stripe.return_value = mock_s
+        mock_intent = MagicMock()
+        mock_intent.id = "pi_idem123"
+        mock_intent.client_secret = "pi_idem123_secret_xxx"
+        mock_s.PaymentIntent.create.return_value = mock_intent
+
+        import uuid
+        idem_key = str(uuid.uuid4())
+
+        # First request
+        response1 = self._post({
+            "recipient_id": str(self.recipient.id),
+            "amount": "20.00",
+            "idempotency_key": idem_key,
+        })
+        self.assertEqual(response1.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Tip.objects.count(), 1)
+
+        # Ensure idempotency_key was passed to Stripe
+        kwargs = mock_s.PaymentIntent.create.call_args.kwargs
+        self.assertEqual(kwargs.get("idempotency_key"), f"tip_intent_{idem_key}")
+
+        # Second request with identical idempotency_key
+        # Since Stripe returns the same mock intent ID, Tip get_or_create should prevent duplicates
+        response2 = self._post({
+            "recipient_id": str(self.recipient.id),
+            "amount": "20.00",
+            "idempotency_key": idem_key,
+        })
+        self.assertEqual(response2.status_code, status.HTTP_201_CREATED)
+        
+        # Still exactly 1 tip in the DB
+        self.assertEqual(Tip.objects.count(), 1)
+        self.assertEqual(response1.data["tip"]["id"], response2.data["tip"]["id"])
+
+    @patch("api.tip.services._stripe")
     def test_commission_correct_in_stripe_call(self, mock_stripe):
         """Verify application_fee_amount in cents = commission amount."""
         mock_s = MagicMock()

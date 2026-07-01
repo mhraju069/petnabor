@@ -83,6 +83,11 @@ class SendTipSerializer(serializers.Serializer):
         allow_blank=True,
         default="",
     )
+    idempotency_key = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text="Optional UUID for idempotency. Recommended to prevent duplicate tips.",
+    )
 
     def validate_amount(self, value):
         tip_settings = TipSettings.get_instance()
