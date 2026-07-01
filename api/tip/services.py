@@ -47,8 +47,18 @@ def create_connect_account(user):
 
     try:
         connect = user.stripe_connect_account
-        onboarding_url = _get_account_link(connect.stripe_account_id)
-        return connect, onboarding_url
+        try:
+            onboarding_url = _get_account_link(connect.stripe_account_id)
+            return connect, onboarding_url
+        except stripe.error.InvalidRequestError as exc:
+            if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
+                logger.warning("Stripe Connect account %s invalid/unlinked during onboarding. Auto-deleting.", connect.stripe_account_id)
+                connect.delete()
+            else:
+                raise
+        except stripe.error.PermissionError as exc:
+            logger.warning("Stripe Connect account %s permission denied during onboarding. Auto-deleting.", connect.stripe_account_id)
+            connect.delete()
     except StripeConnectAccount.DoesNotExist:
         pass
 
@@ -114,7 +124,16 @@ def refresh_onboarding_link(user):
     Raises StripeConnectAccount.DoesNotExist if no account yet.
     """
     connect = user.stripe_connect_account
-    return _get_account_link(connect.stripe_account_id)
+    try:
+        return _get_account_link(connect.stripe_account_id)
+    except stripe.error.InvalidRequestError as exc:
+        if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
+            connect.delete()
+            raise StripeConnectAccount.DoesNotExist
+        raise
+    except stripe.error.PermissionError as exc:
+        connect.delete()
+        raise StripeConnectAccount.DoesNotExist
 
 
 def get_connect_account_status(user):
@@ -133,7 +152,19 @@ def get_connect_account_status(user):
 
     was_charges_enabled = connect.is_charges_enabled
 
-    account = s.Account.retrieve(connect.stripe_account_id)
+    try:
+        account = s.Account.retrieve(connect.stripe_account_id)
+    except stripe.error.InvalidRequestError as exc:
+        if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
+            logger.warning("Stripe Connect account %s invalid/unlinked during status fetch. Auto-deleting.", connect.stripe_account_id)
+            connect.delete()
+            return None
+        raise
+    except stripe.error.PermissionError as exc:
+        logger.warning("Stripe Connect account %s permission denied during status fetch. Auto-deleting.", connect.stripe_account_id)
+        connect.delete()
+        return None
+
     connect.is_charges_enabled = account.charges_enabled
     connect.is_payouts_enabled = account.payouts_enabled
     connect.is_onboarding_complete = (
