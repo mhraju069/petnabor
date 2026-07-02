@@ -47,8 +47,18 @@ def create_connect_account(user):
 
     try:
         connect = user.stripe_connect_account
-        onboarding_url = _get_account_link(connect.stripe_account_id)
-        return connect, onboarding_url
+        try:
+            onboarding_url = _get_account_link(connect.stripe_account_id)
+            return connect, onboarding_url
+        except stripe.error.InvalidRequestError as exc:
+            if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
+                logger.warning("Stripe Connect account %s invalid/unlinked during onboarding. Auto-deleting.", connect.stripe_account_id)
+                connect.delete()
+            else:
+                raise
+        except stripe.error.PermissionError as exc:
+            logger.warning("Stripe Connect account %s permission denied during onboarding. Auto-deleting.", connect.stripe_account_id)
+            connect.delete()
     except StripeConnectAccount.DoesNotExist:
         pass
 
@@ -114,7 +124,16 @@ def refresh_onboarding_link(user):
     Raises StripeConnectAccount.DoesNotExist if no account yet.
     """
     connect = user.stripe_connect_account
-    return _get_account_link(connect.stripe_account_id)
+    try:
+        return _get_account_link(connect.stripe_account_id)
+    except stripe.error.InvalidRequestError as exc:
+        if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
+            connect.delete()
+            raise StripeConnectAccount.DoesNotExist
+        raise
+    except stripe.error.PermissionError as exc:
+        connect.delete()
+        raise StripeConnectAccount.DoesNotExist
 
 
 def get_connect_account_status(user):
@@ -133,7 +152,19 @@ def get_connect_account_status(user):
 
     was_charges_enabled = connect.is_charges_enabled
 
-    account = s.Account.retrieve(connect.stripe_account_id)
+    try:
+        account = s.Account.retrieve(connect.stripe_account_id)
+    except stripe.error.InvalidRequestError as exc:
+        if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
+            logger.warning("Stripe Connect account %s invalid/unlinked during status fetch. Auto-deleting.", connect.stripe_account_id)
+            connect.delete()
+            return None
+        raise
+    except stripe.error.PermissionError as exc:
+        logger.warning("Stripe Connect account %s permission denied during status fetch. Auto-deleting.", connect.stripe_account_id)
+        connect.delete()
+        return None
+
     connect.is_charges_enabled = account.charges_enabled
     connect.is_payouts_enabled = account.payouts_enabled
     connect.is_onboarding_complete = (
@@ -217,22 +248,34 @@ def create_tip_payment_intent(
         pass
 
     if has_verified_account:
-        intent = s.PaymentIntent.create(
-            amount=amount_cents,
-            currency="usd",
-            application_fee_amount=commission_cents,
-            transfer_data={"destination": connect.stripe_account_id},
-            metadata={
-                "tipper_id": str(tipper.id),
-                "recipient_id": str(recipient.id),
-                "meeting_id": str(meeting.id) if meeting else "",
-                "flow": "direct",
-            },
-            automatic_payment_methods={"enabled": True},
-        )
-        tip_status = TipStatus.PENDING
+        try:
+            intent = s.PaymentIntent.create(
+                amount=amount_cents,
+                currency="usd",
+                application_fee_amount=commission_cents,
+                transfer_data={"destination": connect.stripe_account_id},
+                metadata={
+                    "tipper_id": str(tipper.id),
+                    "recipient_id": str(recipient.id),
+                    "meeting_id": str(meeting.id) if meeting else "",
+                    "flow": "direct",
+                },
+                automatic_payment_methods={"enabled": True},
+            )
+            tip_status = TipStatus.PENDING
+        except stripe.error.InvalidRequestError as exc:
+            if "no such destination" in str(exc).lower() or "platform" in str(exc).lower() or "does not exist" in str(exc).lower():
+                logger.warning("Recipient Stripe Connect account %s invalid. Auto-deleting and falling back to HELD.", connect.stripe_account_id)
+                connect.delete()
+                has_verified_account = False
+            else:
+                raise
+        except stripe.error.PermissionError as exc:
+            logger.warning("Recipient Stripe Connect account %s permission denied. Auto-deleting and falling back to HELD.", connect.stripe_account_id)
+            connect.delete()
+            has_verified_account = False
 
-    else:
+    if not has_verified_account:
         intent = s.PaymentIntent.create(
             amount=amount_cents,
             currency="usd",
@@ -246,6 +289,7 @@ def create_tip_payment_intent(
             automatic_payment_methods={"enabled": True},
         )
         tip_status = TipStatus.HELD
+
     tip = Tip.objects.create(
         tipper=tipper,
         recipient=recipient,
