@@ -89,3 +89,4 @@ certbot/conf/
 
 petnabor-wildcard.csr
 petnabor-wildcard.key
+petnabor.pem
