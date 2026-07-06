@@ -186,7 +186,14 @@ if USE_S3:
     
     # We use custom django-storages classes to separate static/media folders in the bucket.
     STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
-    STATICFILES_STORAGE = "api.core.storage_backends.StaticStorage"
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "api.core.storage_backends.StaticStorage",
+        },
+    }
     
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -566,10 +573,18 @@ UNFOLD = {
 
 if USE_S3:
     MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
-    DEFAULT_FILE_STORAGE = "api.core.storage_backends.PublicMediaStorage"
+    STORAGES["default"]["BACKEND"] = "api.core.storage_backends.PublicMediaStorage"
 else:
     MEDIA_URL = "media/"
     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
