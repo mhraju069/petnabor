@@ -14,11 +14,11 @@ Safe environment with content reporting and moderation tools
 Whether you're looking to find playdates for your dog, share adorable pet moments, discover local pet events, or simply connect with other passionate pet owners, PetNabor delivers a joyful, secure, and feature-rich experience tailored for the pet-loving community.
 
 ## Live Demo
-[Live API](https://backend.petnabor.com/api/swagger/)  
+[Live API](https://app.petnabor.com/api/swagger/)  
 
 ## API Documentation
-- **Swagger UI**: [https://backend.petnabor.com/api/swagger/](https://backend.petnabor.com/api/swagger/)  
-- **Redoc**: [https://backend.petnabor.com/api/docs/](https://backend.petnabor.com/api/docs/)  
+- **Swagger UI**: [https://app.petnabor.com/api/swagger/](https://app.petnabor.com/api/swagger/)  
+- **Redoc**: [https://app.petnabor.com/api/docs/](https://app.petnabor.com/api/docs/)  
 
 
 ## Features
