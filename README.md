@@ -128,9 +128,7 @@ python manage.py createsuperuser
 | `POST_THUMB_QUALITY` | Output quality for generated thumbnails. |
 | `FILE_UPLOAD_MAX_MEMORY_SIZE_MB` | Max in-memory file upload size. |
 | `DATA_UPLOAD_MAX_MEMORY_SIZE_MB` | Max request payload size. |
-| `SENTRY_DSN` | Sentry DSN for error monitoring. |
-| `SENTRY_ENVIRONMENT` | Sentry environment name. |
-| `SENTRY_TRACES_SAMPLE_RATE` | Sentry traces sample rate. |
+
 
 ## Running the Project
 ```bash
