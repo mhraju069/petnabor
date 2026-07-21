@@ -173,6 +173,28 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+
+# ─── AWS S3 / CloudFront Configuration ─────────────────────────────────────
+USE_S3 = os.getenv("USE_S3") == "True"
+
+if USE_S3:
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+    AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+    AWS_S3_CUSTOM_DOMAIN = os.getenv("AWS_S3_CUSTOM_DOMAIN")
+    
+    # We use custom django-storages classes to separate static/media folders in the bucket.
+    STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "api.core.storage_backends.StaticStorage",
+        },
+    }
+    
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # django-unfold Admin Configuration
@@ -549,8 +571,20 @@ UNFOLD = {
     "TABS": [],
 }
 
-MEDIA_URL = "media/"
-MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+if USE_S3:
+    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
+    STORAGES["default"]["BACKEND"] = "api.core.storage_backends.PublicMediaStorage"
+else:
+    MEDIA_URL = "media/"
+    MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -600,7 +634,7 @@ SPECTACULAR_SETTINGS = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=30),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
@@ -613,8 +647,11 @@ FIREBASE_CREDENTIALS = os.path.join(BASE_DIR, "firebase-credentials.json")
 
 def initialize_firebase():
     if not firebase_admin._apps:
-        cred = credentials.Certificate(FIREBASE_CREDENTIALS)
-        firebase_admin.initialize_app(cred)
+        if os.path.exists(FIREBASE_CREDENTIALS):
+            cred = credentials.Certificate(FIREBASE_CREDENTIALS)
+            firebase_admin.initialize_app(cred)
+        else:
+            print("Warning: firebase-credentials.json not found. Firebase services will not work.")
 
 initialize_firebase()
 
@@ -631,14 +668,22 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 # Base URL for Stripe Connect redirect URLs
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://petnabor.com")
 
-# Email Configuration (Gmail SMTP)
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = os.getenv("EMAIL_HOST", "")
-EMAIL_PORT = os.getenv("EMAIL_PORT", "")
-EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "")
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.getenv("EMAIL_HOST_USER", "")
+# Email Configuration
+USE_SES = os.getenv("USE_SES") == "True"
+
+if USE_SES:
+    EMAIL_BACKEND = "django_ses.SESBackend"
+    AWS_SES_REGION_NAME = os.getenv("AWS_SES_REGION_NAME", "us-east-1")
+    AWS_SES_REGION_ENDPOINT = os.getenv("AWS_SES_REGION_ENDPOINT", "email.us-east-1.amazonaws.com")
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+    EMAIL_PORT = os.getenv("EMAIL_PORT", "")
+    EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "")
+    EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+    EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "info@petnabor.com")
 
 # OTP Configuration
 OTP_LENGTH = int(os.getenv("OTP_LENGTH", "4"))

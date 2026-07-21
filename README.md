@@ -14,11 +14,11 @@ Safe environment with content reporting and moderation tools
 Whether you're looking to find playdates for your dog, share adorable pet moments, discover local pet events, or simply connect with other passionate pet owners, PetNabor delivers a joyful, secure, and feature-rich experience tailored for the pet-loving community.
 
 ## Live Demo
-[Live API](https://backend.petnabor.com/api/swagger/)  
+[Live API](https://app.petnabor.com/api/swagger/)  
 
 ## API Documentation
-- **Swagger UI**: [https://backend.petnabor.com/api/swagger/](https://backend.petnabor.com/api/swagger/)  
-- **Redoc**: [https://backend.petnabor.com/api/docs/](https://backend.petnabor.com/api/docs/)  
+- **Swagger UI**: [https://app.petnabor.com/api/swagger/](https://app.petnabor.com/api/swagger/)  
+- **Redoc**: [https://app.petnabor.com/api/docs/](https://app.petnabor.com/api/docs/)  
 
 
 ## Features
@@ -128,9 +128,7 @@ python manage.py createsuperuser
 | `POST_THUMB_QUALITY` | Output quality for generated thumbnails. |
 | `FILE_UPLOAD_MAX_MEMORY_SIZE_MB` | Max in-memory file upload size. |
 | `DATA_UPLOAD_MAX_MEMORY_SIZE_MB` | Max request payload size. |
-| `SENTRY_DSN` | Sentry DSN for error monitoring. |
-| `SENTRY_ENVIRONMENT` | Sentry environment name. |
-| `SENTRY_TRACES_SAMPLE_RATE` | Sentry traces sample rate. |
+
 
 ## Running the Project
 ```bash
