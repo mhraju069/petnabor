@@ -179,6 +179,9 @@ class FirebaseTokenSerializer(serializers.Serializer):
     referred_by_code = serializers.CharField(
         required=False, allow_blank=True, max_length=50
     )
+    nonce = serializers.CharField(
+        required=False, allow_blank=True, max_length=255, help_text="Nonce for Apple Sign-In verification"
+    )
 
     def validate_referred_by_code(self, value):
         if value:

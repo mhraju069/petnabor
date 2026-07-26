@@ -559,3 +559,95 @@ class ValidatorTests(TestCase):
         from rest_framework.exceptions import ValidationError
         with self.assertRaises(ValidationError):
             validate_email_format("not-an-email")
+
+
+class FirebaseLoginTests(APITestCase):
+    def setUp(self):
+        self.firebase_login_url = reverse("firebase-login")
+        self.client = APIClient()
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_apple_login_missing_nonce(self, mock_verify):
+        """Apple login should fail if token has nonce but no nonce provided in API."""
+        mock_verify.return_value = {
+            "uid": "apple-uid-123",
+            "email": "apple@example.com",
+            "firebase": {
+                "sign_in_provider": "apple.com",
+                "sign_in_attributes": {
+                    "nonce": "some_hashed_nonce_123"
+                }
+            }
+        }
+        response = self.client.post(self.firebase_login_url, {
+            "id_token": "dummy_apple_token"
+        })
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("Nonce is required", str(response.data))
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_apple_login_valid_raw_nonce(self, mock_verify):
+        """Apple login should succeed if the raw nonce provided hashes to the token's nonce."""
+        import hashlib
+        raw_nonce = "my_super_secret_nonce"
+        hashed_nonce = hashlib.sha256(raw_nonce.encode("utf-8")).hexdigest()
+        
+        mock_verify.return_value = {
+            "uid": "apple-uid-123",
+            "email": "apple@example.com",
+            "firebase": {
+                "sign_in_provider": "apple.com",
+                "sign_in_attributes": {
+                    "nonce": hashed_nonce
+                }
+            }
+        }
+        response = self.client.post(self.firebase_login_url, {
+            "id_token": "dummy_apple_token",
+            "nonce": raw_nonce
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access_token", response.data["data"])
+        
+        # User should be created
+        user = User.objects.get(firebase_uid="apple-uid-123")
+        self.assertTrue(user.is_verified)
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_apple_login_valid_hashed_nonce(self, mock_verify):
+        """Apple login should succeed if the already-hashed nonce is provided."""
+        hashed_nonce = "pre_hashed_nonce_string_from_apple"
+        
+        mock_verify.return_value = {
+            "uid": "apple-uid-456",
+            "email": "apple2@example.com",
+            "firebase": {
+                "sign_in_provider": "apple.com",
+                "sign_in_attributes": {
+                    "nonce": hashed_nonce
+                }
+            }
+        }
+        response = self.client.post(self.firebase_login_url, {
+            "id_token": "dummy_apple_token_2",
+            "nonce": hashed_nonce
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access_token", response.data["data"])
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_google_login_no_nonce_required(self, mock_verify):
+        """Google login should succeed without providing any nonce."""
+        mock_verify.return_value = {
+            "uid": "google-uid-789",
+            "email": "google@example.com",
+            "firebase": {
+                "sign_in_provider": "google.com",
+            }
+        }
+        response = self.client.post(self.firebase_login_url, {
+            "id_token": "dummy_google_token"
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("access_token", response.data["data"])
+

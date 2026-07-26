@@ -410,6 +410,7 @@ def firebase_login_service(
     agree_to_terms_and_conditions=False,
     ai_data_consent=False,
     referred_by_code=None,
+    nonce="",
 ):
     """
     Authenticate via Firebase ID token.
@@ -421,6 +422,21 @@ def firebase_login_service(
     except Exception as exc:
         logger.warning("Firebase token verification failed: %s", exc)
         raise AuthenticationFailed(detail="Invalid Firebase token.")
+
+    firebase_data = decoded_token.get("firebase", {})
+    sign_in_provider = firebase_data.get("sign_in_provider", "")
+
+    # For Apple Sign-In, verify nonce if provided
+    if sign_in_provider == "apple.com":
+        token_nonce = firebase_data.get("sign_in_attributes", {}).get("nonce")
+        if token_nonce:
+            if not nonce:
+                raise AuthenticationFailed(detail="Nonce is required for Apple Sign-In verification.")
+            import hashlib
+            hashed_nonce = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+            # The client might send the raw nonce or the already hashed nonce
+            if nonce != token_nonce and hashed_nonce != token_nonce:
+                raise AuthenticationFailed(detail="Invalid nonce for Apple Sign-In.")
 
     uid = decoded_token.get("uid")
     email = decoded_token.get("email")

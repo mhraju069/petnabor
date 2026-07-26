@@ -459,6 +459,7 @@ class FirebaseLoginView(APIView):
                 "ai_data_consent", False
             ),
             referred_by_code=serializer.validated_data.get("referred_by_code"),
+            nonce=serializer.validated_data.get("nonce", ""),
         )
 
         return Response(
