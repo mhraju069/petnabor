@@ -61,6 +61,7 @@ def _build_user_data(user):
         "is_email_verified": user.is_email_verified,
         "is_phone_verified": user.is_phone_verified,
         "agree_to_terms_and_conditions": user.agree_to_terms_and_conditions,
+        "ai_data_consent": user.ai_data_consent,
     }
 
 
@@ -104,6 +105,7 @@ class SignupView(APIView):
             last_name=data.get("last_name", ""),
             user_type=data.get("user_type", "petnabor"),
             agree_to_terms_and_conditions=data.get("agree_to_terms_and_conditions", False),
+            ai_data_consent=data.get("ai_data_consent", False),
             referred_by_code=data.get("referred_by_code"),
         )
 
@@ -452,6 +454,9 @@ class FirebaseLoginView(APIView):
             user_type=serializer.validated_data.get("user_type", "petnabor"),
             agree_to_terms_and_conditions=serializer.validated_data.get(
                 "agree_to_terms_and_conditions", False
+            ),
+            ai_data_consent=serializer.validated_data.get(
+                "ai_data_consent", False
             ),
             referred_by_code=serializer.validated_data.get("referred_by_code"),
         )

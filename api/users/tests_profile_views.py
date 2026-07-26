@@ -32,7 +32,7 @@ class ProfileUpdateViewTests(TestCase):
 
         # Generate JWT token by authenticating
         response = self.client.post(
-            reverse("users-login"), 
+            reverse("login"), 
             {"email_or_phone": "testprofile@test.com", "password": "password123"},
             format="json"
         )
@@ -51,7 +51,7 @@ class ProfileUpdateViewTests(TestCase):
         initial_pic = make_test_image(name="initial.jpg")
         
         # Test updating the profile picture
-        url = reverse("users-profile")
+        url = reverse("profile-detail")
         response = self.client.patch(
             url, 
             {"profile_picture": initial_pic},

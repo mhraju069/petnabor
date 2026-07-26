@@ -74,6 +74,7 @@ class User(AbstractUser):
         max_length=20, choices=UserTypes.choices, default=UserTypes.PETNABOR
     )
     agree_to_terms_and_conditions = models.BooleanField(default=False)
+    ai_data_consent = models.BooleanField(default=False)
     firebase_uid = models.CharField(max_length=255, unique=True, null=True, blank=True)
 
     # Verification flags

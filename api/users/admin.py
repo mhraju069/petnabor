@@ -82,7 +82,7 @@ class UserAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         (
             _("Account Type"),
             {
-                "fields": ("user_type", "is_petpal", "agree_to_terms_and_conditions"),
+                "fields": ("user_type", "is_petpal", "agree_to_terms_and_conditions", "ai_data_consent"),
             },
         ),
         (

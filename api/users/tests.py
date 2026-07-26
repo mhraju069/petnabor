@@ -144,6 +144,20 @@ class SignupTests(APITestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    @patch("api.users.services.send_email_otp")
+    def test_signup_with_ai_data_consent(self, mock_send_email):
+        """Signup with ai_data_consent should save it correctly."""
+        response = self.client.post(self.signup_url, {
+            "email": "ai_consent@example.com",
+            "password": TEST_PASSWORD,
+            "ai_data_consent": True,
+        })
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data["data"]["user"]["ai_data_consent"])
+
+        user = User.objects.get(email="ai_consent@example.com")
+        self.assertTrue(user.ai_data_consent)
+
 
 # ──────────────────────────────────────────────
 # Phone OTP Verification Tests

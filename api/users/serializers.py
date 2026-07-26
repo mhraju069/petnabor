@@ -32,6 +32,9 @@ class SignupSerializer(serializers.Serializer):
     agree_to_terms_and_conditions = serializers.BooleanField(
         required=False, default=False
     )
+    ai_data_consent = serializers.BooleanField(
+        required=False, default=False
+    )
     referred_by_code = serializers.CharField(
         required=False, allow_blank=True, max_length=50
     )
@@ -170,6 +173,9 @@ class FirebaseTokenSerializer(serializers.Serializer):
     agree_to_terms_and_conditions = serializers.BooleanField(
         required=False, default=False
     )
+    ai_data_consent = serializers.BooleanField(
+        required=False, default=False
+    )
     referred_by_code = serializers.CharField(
         required=False, allow_blank=True, max_length=50
     )
@@ -239,6 +245,7 @@ class UserSerializer(serializers.ModelSerializer):
             "is_superuser",
             "created_at",
             "agree_to_terms_and_conditions",
+            "ai_data_consent",
             "is_petpal",
             "is_online",
             "last_active",

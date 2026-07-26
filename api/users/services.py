@@ -176,6 +176,7 @@ def signup_user(
     last_name="",
     user_type="petnabor",
     agree_to_terms_and_conditions=False,
+    ai_data_consent=False,
     referred_by_code=None,
 ):
     """
@@ -228,6 +229,7 @@ def signup_user(
             last_name=last_name,
             user_type=user_type,
             agree_to_terms_and_conditions=agree_to_terms_and_conditions,
+            ai_data_consent=ai_data_consent,
             is_verified=False,
             is_email_verified=False,
             is_phone_verified=False,
@@ -406,6 +408,7 @@ def firebase_login_service(
     last_name="",
     user_type="petnabor",
     agree_to_terms_and_conditions=False,
+    ai_data_consent=False,
     referred_by_code=None,
 ):
     """
@@ -472,6 +475,7 @@ def firebase_login_service(
             last_name=last_name,
             user_type=user_type,
             agree_to_terms_and_conditions=agree_to_terms_and_conditions,
+            ai_data_consent=ai_data_consent,
             firebase_uid=uid,
             is_verified=True,
             is_email_verified=bool(email),
