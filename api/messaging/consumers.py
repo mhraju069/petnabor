@@ -30,7 +30,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     def _get_base_url(self):
         """
-        Build 'https://backend.petnabor.com' from the WebSocket scope.
+        Build 'https://app.petnabor.com' from the WebSocket scope.
         - scheme: 'wss'→'https', 'ws'→'http' (nginx sets X-Forwarded-Proto)
         - host:   pulled from the HTTP Host header in the handshake
         """

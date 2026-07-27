@@ -130,7 +130,7 @@ The repository currently includes Nginx configuration for:
 | WebSocket upgrades | `/ws/` location passes `Upgrade` and `Connection` headers |
 | Large uploads | `client_max_body_size 5000M` and long proxy timeouts |
 | Local static/media serving | `/static/` and `/media/` aliases for Docker volumes |
-| Host-level TLS | `nginx/backend.petnabor.com.host.conf` documents HTTPS proxying |
+| Host-level TLS | `nginx/app.petnabor.com.host.conf` documents HTTPS proxying |
 
 In AWS production, local media serving should be replaced by S3-backed storage and CloudFront delivery. See [Backend Infrastructure & Caching](./infrastructure.md#7-object-storage-cdn-and-media-delivery).
 
@@ -491,7 +491,7 @@ Performance-sensitive areas:
 | Database | Dockerized PostGIS for current Compose deployment; RDS is the intended AWS production target |
 | Redis | Single Redis instance shared by cache, Celery, and Channels |
 | Static/media | Local Docker volumes today; S3/CloudFront recommended for AWS production |
-| TLS | Host Nginx config exists for `backend.petnabor.com`; AWS should terminate TLS at CloudFront/ALB |
+| TLS | Host Nginx config exists for `app.petnabor.com`; AWS should terminate TLS at CloudFront/ALB |
 | Product API | Product models/admin exist, but product URLs are not mounted in the root API router |
 | Wishlist API | Wishlist model/admin exists, but wishlist URLs are not mounted in the root API router |
 | Health checks | No dedicated health endpoint is currently visible in the root URL configuration |

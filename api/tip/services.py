@@ -108,7 +108,7 @@ def _get_account_link(account_id, return_url=None, refresh_url=None):
     redirects to the mobile app's deep link (petnabor://).
     """
     s = _stripe()
-    domain = getattr(settings, "BACKEND_BASE_URL", "https://backend.petnabor.com")
+    domain = getattr(settings, "BACKEND_BASE_URL", "https://app.petnabor.com")
     link = s.AccountLink.create(
         account=account_id,
         refresh_url=refresh_url or f"{domain}/api/tip/onboard/bridge/?status=refresh",

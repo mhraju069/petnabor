@@ -25,7 +25,7 @@ ALLOWED_HOSTS = (
     else []
 )
 
-ALLOWED_HOSTS += ["backend.petnabor.com", "172.252.13.85", "localhost", "127.0.0.1"]
+# ALLOWED_HOSTS += [ "172.252.13.85", "localhost", "127.0.0.1"]
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
@@ -35,13 +35,14 @@ CSRF_TRUSTED_ORIGINS = (
     os.getenv("CSRF_TRUSTED_ORIGINS").split(",")
     if os.getenv("CSRF_TRUSTED_ORIGINS")
     else []
-) + [
-    "http://localhost:8002",
-    "http://127.0.0.1:8002",
-    "https://backend.petnabor.com",
-    "http://172.252.13.85",
-    "https://172.252.13.85",
-]
+)
+# + [
+#     "http://localhost:8002",
+#     "http://127.0.0.1:8002",
+#     "https://app.petnabor.com",
+#     "http://172.252.13.85",
+#     "https://172.252.13.85",
+# ]
 
 INSTALLED_APPS = [
     "daphne",
