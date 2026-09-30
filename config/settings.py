@@ -31,11 +31,11 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 USE_X_FORWARDED_PORT = True
 
-CSRF_TRUSTED_ORIGINS = (
-    os.getenv("CSRF_TRUSTED_ORIGINS").split(",")
-    if os.getenv("CSRF_TRUSTED_ORIGINS")
-    else []
-)
+CSRF_TRUSTED_ORIGINS = [
+    origin if origin.startswith(("http://", "https://")) else f"http://{origin}"
+    for origin in (os.getenv("CSRF_TRUSTED_ORIGINS").split(",") if os.getenv("CSRF_TRUSTED_ORIGINS") else [])
+    if origin
+]
 # + [
 #     "http://localhost:8002",
 #     "http://127.0.0.1:8002",
@@ -178,10 +178,10 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
-# ─── AWS S3 / CloudFront Configuration ─────────────────────────────────────
+# ─── AWS S3 / CloudFront & Local Storage Configuration ─────────────────────
 USE_S3 = os.getenv("USE_S3") == "True"
 
 if USE_S3:
@@ -190,17 +190,35 @@ if USE_S3:
     AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
     AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
     AWS_S3_CUSTOM_DOMAIN = os.getenv("AWS_S3_CUSTOM_DOMAIN")
-    
-    # We use custom django-storages classes to separate static/media folders in the bucket.
+
+    # Custom django-storages classes to separate static/media folders in S3 bucket.
     STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
+    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
+
     STORAGES = {
         "default": {
-            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "BACKEND": "api.core.storage_backends.PublicMediaStorage",
         },
         "staticfiles": {
             "BACKEND": "api.core.storage_backends.StaticStorage",
         },
     }
+else:
+    STATIC_URL = "/static/"
+    MEDIA_URL = "/media/"
+
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    WHITENOISE_MANIFEST_STRICT = False
+
+    # Ensure local media directory exists for file uploads
+    os.makedirs(MEDIA_ROOT, exist_ok=True)
     
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -578,20 +596,7 @@ UNFOLD = {
     "TABS": [],
 }
 
-if USE_S3:
-    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
-    STORAGES["default"]["BACKEND"] = "api.core.storage_backends.PublicMediaStorage"
-else:
-    MEDIA_URL = "media/"
-    MEDIA_ROOT = os.path.join(BASE_DIR, "media")
-    STORAGES = {
-        "default": {
-            "BACKEND": "django.core.files.storage.FileSystemStorage",
-        },
-        "staticfiles": {
-            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-        },
-    }
+# Media and storage configuration is defined in the Storage section above.
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
