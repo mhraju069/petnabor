@@ -210,6 +210,12 @@ else:
     STORAGES = {
         "default": {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
+            # Django 4.2+: FileSystemStorage does NOT auto-read MEDIA_ROOT from settings
+            # when configured via STORAGES dict. Must pass location and base_url explicitly.
+            "OPTIONS": {
+                "location": MEDIA_ROOT,
+                "base_url": MEDIA_URL,
+            },
         },
         "staticfiles": {
             "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
@@ -217,7 +223,7 @@ else:
     }
     WHITENOISE_MANIFEST_STRICT = False
 
-    # Ensure local media directory exists for file uploads
+    # Ensure local media directory exists on startup
     os.makedirs(MEDIA_ROOT, exist_ok=True)
     
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

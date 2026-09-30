@@ -13,8 +13,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-  
-  
+
+
   web:
     build: .
     command: gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 --workers 4
@@ -46,11 +46,10 @@ services:
     env_file:
       - .env
     restart: always
-  
+
 
 volumes:
   postgres_data:
   static_volume:
   media_volume:
   tmp_uploads_volume:
-
