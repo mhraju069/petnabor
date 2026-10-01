@@ -181,10 +181,51 @@ USE_TZ = True
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
-# ─── AWS S3 / CloudFront & Local Storage Configuration ─────────────────────
+# ─── Storage Configuration ────────────────────────────────────────────────────
+# Priority: Cloudinary → AWS S3 → Local filesystem
+# Switch backends by setting USE_CLOUDINARY=True or USE_S3=True in .env.
+
+USE_CLOUDINARY = os.getenv("USE_CLOUDINARY") == "True"
 USE_S3 = os.getenv("USE_S3") == "True"
 
-if USE_S3:
+if USE_CLOUDINARY:
+    # ── Cloudinary ────────────────────────────────────────────────────────────
+    import cloudinary
+
+    CLOUDINARY_STORAGE = {
+        "CLOUD_NAME": os.getenv("CLOUDINARY_CLOUD_NAME"),
+        "API_KEY": os.getenv("CLOUDINARY_API_KEY"),
+        "API_SECRET": os.getenv("CLOUDINARY_API_SECRET"),
+        # Serve assets over HTTPS from Cloudinary's CDN
+        "SECURE": True,
+        # Optional: organise all uploads under a folder prefix in your account
+        "MEDIA_TAG": os.getenv("CLOUDINARY_MEDIA_TAG", "petnabor"),
+    }
+
+    cloudinary.config(
+        cloud_name=CLOUDINARY_STORAGE["CLOUD_NAME"],
+        api_key=CLOUDINARY_STORAGE["API_KEY"],
+        api_secret=CLOUDINARY_STORAGE["API_SECRET"],
+        secure=True,
+    )
+
+    # Cloudinary generates its own CDN URLs — MEDIA_URL is a dummy prefix here.
+    STATIC_URL = "/static/"
+    MEDIA_URL = "/media/cloudinary/"
+
+    STORAGES = {
+        "default": {
+            # django-cloudinary-storage backend handles all model FileField/ImageField uploads.
+            "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    WHITENOISE_MANIFEST_STRICT = False
+
+elif USE_S3:
+    # ── AWS S3 / CloudFront ───────────────────────────────────────────────────
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
     AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
@@ -203,7 +244,9 @@ if USE_S3:
             "BACKEND": "api.core.storage_backends.StaticStorage",
         },
     }
+
 else:
+    # ── Local filesystem (development / no cloud) ─────────────────────────────
     STATIC_URL = "/static/"
     MEDIA_URL = "/media/"
 
@@ -225,7 +268,12 @@ else:
 
     # Ensure local media directory exists on startup
     os.makedirs(MEDIA_ROOT, exist_ok=True)
-    
+
+# ── Cloudinary apps (only injected when USE_CLOUDINARY=True) ─────────────────
+# django-cloudinary-storage requires these two entries to be in INSTALLED_APPS.
+if USE_CLOUDINARY:
+    INSTALLED_APPS += ["cloudinary_storage", "cloudinary"]
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # django-unfold Admin Configuration
