@@ -735,17 +735,34 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://petnabor.com")
 
 # Email Configuration
+# Priority: Resend → AWS SES → generic SMTP
+USE_RESEND = os.getenv("USE_RESEND") == "True"
 USE_SES = os.getenv("USE_SES") == "True"
 
-if USE_SES:
+if USE_RESEND:
+    # ── Resend (smtp.resend.com relay) ────────────────────────────────────────
+    # Resend exposes a standard SMTP relay — no extra package needed.
+    # Docs: https://resend.com/docs/send-with-smtp
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = "smtp.resend.com"
+    EMAIL_PORT = 465
+    EMAIL_USE_SSL = True       # Port 465 uses SSL, not STARTTLS
+    EMAIL_USE_TLS = False      # Must be False when EMAIL_USE_SSL=True
+    EMAIL_HOST_USER = "resend" # Resend always uses the literal string "resend"
+    EMAIL_HOST_PASSWORD = os.getenv("RESEND_API_KEY", "")
+
+elif USE_SES:
+    # ── AWS SES ───────────────────────────────────────────────────────────────
     EMAIL_BACKEND = "django_ses.SESBackend"
     AWS_SES_REGION_NAME = os.getenv("AWS_SES_REGION_NAME", "us-east-1")
     AWS_SES_REGION_ENDPOINT = os.getenv("AWS_SES_REGION_ENDPOINT", "email.us-east-1.amazonaws.com")
+
 else:
+    # ── Generic SMTP (fallback) ────────────────────────────────────────────────
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
     EMAIL_HOST = os.getenv("EMAIL_HOST", "")
-    EMAIL_PORT = os.getenv("EMAIL_PORT", "")
-    EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "")
+    EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+    EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
     EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
     EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 
