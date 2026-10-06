@@ -8,6 +8,28 @@ from django.utils.html import strip_tags
 
 logger = logging.getLogger(__name__)
 
+# ── Senders for branded Pet Nabor emails ──────────────────────────────────────
+# Gmail (and most clients) display the sender as the bare local-part of the
+# email address when no display name is set. We want all Pet Nabor transactional
+# emails to appear as "Pet Nabor <noreply@petnabor.com>".
+#
+# `EMAIL_FROM_NAME` is read from environment / settings (default: "Pet Nabor")
+# and combined with DEFAULT_FROM_EMAIL to build the RFC 5322 "From" header.
+# Each sender can be fully overridden by setting the corresponding
+# `EMAIL_FROM_NAME_*` setting.
+_BRAND_FROM_NAME: str = getattr(settings, "EMAIL_FROM_NAME", "Pet Nabor")
+
+_PASSWORD_RESET_FROM_EMAIL: str = getattr(
+    settings,
+    "EMAIL_FROM_NAME_PASSWORD_RESET",
+    f"{_BRAND_FROM_NAME} <{settings.DEFAULT_FROM_EMAIL}>",
+)
+_OTP_VERIFY_FROM_EMAIL: str = getattr(
+    settings,
+    "EMAIL_FROM_NAME_OTP_VERIFY",
+    f"{_BRAND_FROM_NAME} <{settings.DEFAULT_FROM_EMAIL}>",
+)
+
 
 class EmailService:
     """
@@ -16,7 +38,7 @@ class EmailService:
     """
 
     # ── Brand constants ────────────────────────────────────────────────────────
-    _LOGO_URL = "https://www.petnabor.com/wp-content/uploads/2026/04/Pet-Nabor-Logo-1.png"
+    _LOGO_URL = "https://res.cloudinary.com/xclcbbmj/image/upload/v1791205028/a4ufstpu8ud9dbpz6f0l.svg"
     _COLOR_HEADER_BG  = "#BFE3F7"
     _COLOR_ACCENT     = "#F28C28"   # dashed border, strong highlights
     _COLOR_ACCENT_ALT = "#E05A1B"   # password-reset variant (deeper orange-red)
@@ -181,7 +203,12 @@ class EmailService:
             ),
             accent_color=cls._COLOR_ACCENT,
         )
-        return cls.send_html_email(subject, html, [email])
+        return cls.send_html_email(
+            subject,
+            html,
+            [email],
+            from_email=_OTP_VERIFY_FROM_EMAIL,
+        )
 
     @classmethod
     def send_password_reset_email(
@@ -203,4 +230,9 @@ class EmailService:
             ),
             accent_color=cls._COLOR_ACCENT_ALT,
         )
-        return cls.send_html_email(subject, html, [email])
+        return cls.send_html_email(
+            subject,
+            html,
+            [email],
+            from_email=_PASSWORD_RESET_FROM_EMAIL,
+        )

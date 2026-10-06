@@ -766,7 +766,12 @@ else:
     EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
     EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 
-DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "info@petnabor.com")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@petnabor.com")
+
+# Display name for password reset emails (RFC 5322 "From" header friendly-name).
+# Combined with DEFAULT_FROM_EMAIL as `"{EMAIL_FROM_NAME} <{DEFAULT_FROM_EMAIL}">`
+# at the email-service layer so Gmail renders "Pet Nabor" instead of "info".
+EMAIL_FROM_NAME: str = os.getenv("EMAIL_FROM_NAME", "Pet Nabor")
 
 # OTP Configuration
 OTP_LENGTH = int(os.getenv("OTP_LENGTH", "4"))
