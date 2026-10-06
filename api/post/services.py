@@ -13,6 +13,7 @@ import re
 from typing import List, Optional, Tuple
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.files.uploadedfile import InMemoryUploadedFile
 from django.db import transaction
 from django.db.models import F, Prefetch, Q, QuerySet
@@ -303,7 +304,11 @@ class LikeService:
             # New like — increment counter
             Post.objects.filter(id=post.id).update(likes_count=F("likes_count") + 1)
             # Fire notification (async — non-blocking)
-            if post.author_id != user.id:
+            # cache.add is atomic: only the first like ever from this user on this
+            # post notifies. Unlike/re-like cycles stay silent.
+            if post.author_id != user.id and cache.add(
+                f"notified_post_like_{post.id}_{user.id}", 1, timeout=60 * 60 * 24 * 365
+            ):
                 try:
                     from api.notifications.services import send_notification
                     from api.notifications.models import NotificationTypes

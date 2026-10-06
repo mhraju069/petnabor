@@ -32,7 +32,10 @@ class BlogService:
                 cache.delete("blog_list_cache")
                 cache.delete("blog_popular_cache")
                 
-                if blog.author != user:
+                # Notify only on the first like ever; re-likes stay silent.
+                if blog.author != user and cache.add(
+                    f"notified_blog_like_{blog.id}_{user.id}", 1, timeout=60 * 60 * 24 * 365
+                ):
                     sender_display = f"{user.first_name} {user.last_name}".strip() or user.username or "Someone"
                     send_notification(
                         title=sender_display,
