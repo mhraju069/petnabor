@@ -85,7 +85,9 @@ class AutoMediaCloudinaryStorage:
 
             def _get_resource_type(self, name):
                 ext = _ext(name)
-                if ext in cls._IMAGE_EXT:
+                # Extensionless names are legacy image uploads (Cloudinary strips
+                # the extension from image public_ids), so treat them as images.
+                if not ext or ext in cls._IMAGE_EXT:
                     return "image"
                 if ext in cls._VIDEO_EXT:
                     return "video"
