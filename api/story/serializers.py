@@ -7,6 +7,7 @@ Key design choices:
 - `StoryAuthorSerializer` is a lightweight embed — avoids N+1 from full User serializer.
 """
 
+from django.conf import settings
 from rest_framework import serializers
 
 from api.users.models import User
@@ -68,11 +69,62 @@ class StoryCreateSerializer(serializers.ModelSerializer):
             attrs.pop("media", None)
 
         else:  # IMAGE or VIDEO
-            if not attrs.get("media"):
+            media_file = attrs.get("media")
+            if not media_file:
                 raise serializers.ValidationError(
                     {
                         "media": (
                             f"media file is required for {media_type} stories."
+                        )
+                    }
+                )
+
+            # 1. Size check — catch over-limit uploads here instead of letting
+            # them reach Cloudinary (which would surface as a 500).
+            max_bytes = getattr(
+                settings, "STORY_MEDIA_MAX_SIZE_BYTES", 9 * 1024 * 1024
+            )
+            if media_file.size > max_bytes:
+                raise serializers.ValidationError(
+                    {
+                        "media": (
+                            f"'{media_file.name}' exceeds the "
+                            f"{max_bytes // (1024 * 1024)} MB size limit."
+                        )
+                    }
+                )
+
+            # 2. Extension check (reuse post rules — same allowed set)
+            allowed_ext = getattr(
+                settings, "POST_ALLOWED_EXTENSIONS",
+                {"jpg", "jpeg", "png", "webp", "gif", "mp4", "mov"},
+            )
+            name = getattr(media_file, "name", "") or ""
+            if "." in name:
+                ext = name.rsplit(".", 1)[-1].lower()
+                if ext not in allowed_ext:
+                    raise serializers.ValidationError(
+                        {
+                            "media": (
+                                f"'{name}' has an unsupported extension ('{ext}')."
+                            )
+                        }
+                    )
+
+            # 3. MIME type check
+            allowed_mime = getattr(
+                settings,
+                "POST_ALLOWED_MIME_TYPES",
+                {"image/jpeg", "image/png", "image/webp", "image/gif",
+                 "video/mp4", "video/quicktime"},
+            )
+            content_type = getattr(media_file, "content_type", "") or ""
+            if content_type and content_type not in allowed_mime:
+                raise serializers.ValidationError(
+                    {
+                        "media": (
+                            f"'{name}' has an unsupported MIME type "
+                            f"('{content_type}')."
                         )
                     }
                 )

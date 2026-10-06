@@ -215,8 +215,10 @@ if USE_CLOUDINARY:
 
     STORAGES = {
         "default": {
-            # django-cloudinary-storage backend handles all model FileField/ImageField uploads.
-            "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+            # Auto-detects Cloudinary resource_type per file (image vs video vs raw).
+            # This is required because MediaCloudinaryStorage forces "image" and
+            # rejects video files with "Invalid image file" / wrong size quota.
+            "BACKEND": "api.core.storage_backends.AutoMediaCloudinaryStorage",
         },
         "staticfiles": {
             "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
@@ -799,6 +801,16 @@ POST_IMAGE_THUMB_DIM = (400, 400)
 POST_IMAGE_QUALITY = int(os.getenv("POST_IMAGE_QUALITY", "85"))
 POST_THUMB_QUALITY = int(os.getenv("POST_THUMB_QUALITY", "75"))
 POST_ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "webp", "gif", "mp4", "mov"}
+
+# Story / Media Processing Settings
+# Per-resource-type Cloudinary quotas (free plan): images ~10 MB, videos ~100 MB.
+# We default the app-side cap to 95 MB so a size violation surfaces as a clean
+# 400 here rather than as a 500 from Cloudinary. The storage backend
+# (api.core.storage_backends.AutoMediaCloudinaryStorage) auto-routes videos to
+# Cloudinary's "video" resource_type, so this 95 MB cap applies safely to MP4/MOV.
+# Override via STORY_MEDIA_MAX_SIZE_MB in .env if your Cloudinary plan supports
+# larger uploads.
+STORY_MEDIA_MAX_SIZE_BYTES = int(os.getenv("STORY_MEDIA_MAX_SIZE_MB", "95")) * 1024 * 1024
 
 # Allowed MIME types for media uploads
 POST_ALLOWED_IMAGE_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif"}
