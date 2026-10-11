@@ -26,5 +26,8 @@ class MessagePagination(CursorPagination):
     """
 
     page_size = 30
+    # Documented on the endpoint (OpenAPI) — honour it, within a cap.
+    page_size_query_param = "page_size"
+    max_page_size = 100
     ordering = "-created_at"
     cursor_query_param = "cursor"

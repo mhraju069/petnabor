@@ -204,6 +204,7 @@ class ChatThreadSerializer(serializers.ModelSerializer):
     other_user = serializers.SerializerMethodField()
     members = serializers.SerializerMethodField()
     is_read = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
     last_message_text = serializers.SerializerMethodField()
     last_message_timestamp = serializers.SerializerMethodField()
 
@@ -219,6 +220,7 @@ class ChatThreadSerializer(serializers.ModelSerializer):
             "last_message_text",
             "last_message_timestamp",
             "is_read",
+            "unread_count",
             "created_at",
         ]
 
@@ -282,13 +284,16 @@ class ChatThreadSerializer(serializers.ModelSerializer):
             self._get_active_participants(thread), many=True, context=self.context
         ).data
 
-    def get_is_read(self, thread):
+    def get_unread_count(self, thread):
         """
-        True when the current user has no unread messages from others in this thread.
+        Unread messages from others in this thread, for the current user.
         Reads the `unread_count` annotation injected by get_threads_for_user().
         Falls back to a direct DB query if called outside the annotated queryset
-        (e.g. single-thread detail view).
+        (e.g. single-thread detail view). Cached per thread for get_is_read.
         """
+        cache = self.__dict__.setdefault("_unread_cache", {})
+        if thread.pk in cache:
+            return cache[thread.pk]
         unread = getattr(thread, "unread_count", None)
         if unread is None:
             # Fallback for non-annotated querysets (e.g. thread detail, group create)
@@ -300,7 +305,12 @@ class ChatThreadSerializer(serializers.ModelSerializer):
                     is_read=False,
                     is_deleted_for_everyone=False,
                 ).exclude(sender=request.user).count()
-        return (unread or 0) == 0
+        cache[thread.pk] = unread or 0
+        return cache[thread.pk]
+
+    def get_is_read(self, thread):
+        """True when the current user has no unread messages from others."""
+        return self.get_unread_count(thread) == 0
 
 
 class CreateDirectThreadSerializer(serializers.Serializer):

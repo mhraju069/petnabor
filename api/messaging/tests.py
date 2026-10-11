@@ -507,3 +507,66 @@ class MessageAPITest(MessagingBaseTestCase):
     def test_unauthenticated_request_denied(self, mock_notify):
         response = self.client.get(reverse("thread-list-create"))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+@patch("api.messaging.tasks.notify_new_message")
+class MessageCursorPaginationTest(MessagingBaseTestCase):
+    """GET messages walks back through a long thread via ?cursor= (newest first)."""
+
+    TOTAL = 70
+
+    def setUp(self):
+        super().setUp()
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        self.thread = ChatThread.objects.create(
+            thread_type=ThreadTypes.DIRECT, created_by=self.alice
+        )
+        ThreadParticipant.objects.bulk_create([
+            ThreadParticipant(thread=self.thread, user=self.alice),
+            ThreadParticipant(thread=self.thread, user=self.bob),
+        ])
+        Message.objects.bulk_create([
+            Message(
+                thread=self.thread,
+                sender=self.alice if i % 2 else self.bob,
+                message_type=MessageTypes.TEXT,
+                text_content=f"msg {i}",
+            )
+            for i in range(self.TOTAL)
+        ])
+        # Distinct, increasing timestamps: msg 0 oldest … msg 69 newest.
+        start = timezone.now() - timedelta(hours=2)
+        for i in range(self.TOTAL):
+            Message.objects.filter(thread=self.thread, text_content=f"msg {i}").update(
+                created_at=start + timedelta(seconds=i)
+            )
+        self.url = reverse("message-list-create", kwargs={"thread_id": self.thread.id})
+        self.client.force_authenticate(self.alice)
+
+    def test_pages_cover_every_message_once_newest_first(self, _mock):
+        seen = []
+        url = self.url
+        pages = 0
+        while url:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertIn("next", response.data)
+            seen.extend(m["text_content"] for m in response.data["results"])
+            url = response.data["next"]
+            pages += 1
+            self.assertLess(pages, 10, "cursor never ended")
+
+        self.assertEqual(pages, 3)  # 30 + 30 + 10
+        self.assertEqual(len(seen), self.TOTAL)
+        self.assertEqual(len(set(seen)), self.TOTAL)  # no duplicates
+        self.assertEqual(seen[0], f"msg {self.TOTAL - 1}")  # newest first
+        self.assertEqual(seen[-1], "msg 0")
+
+    def test_page_size_param(self, _mock):
+        response = self.client.get(self.url, {"page_size": 50})
+        self.assertEqual(len(response.data["results"]), 50)
+        capped = self.client.get(self.url, {"page_size": 1000})
+        self.assertEqual(len(capped.data["results"]), self.TOTAL)  # cap is 100
