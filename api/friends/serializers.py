@@ -18,6 +18,22 @@ class NearbyUserSerializer(serializers.Serializer):
     distance = serializers.SerializerMethodField()
     profile_picture = serializers.SerializerMethodField()
     location_point = serializers.SerializerMethodField()
+    city = serializers.SerializerMethodField()
+    bio = serializers.SerializerMethodField()
+    # Needs `friend_ids` (a set) in the serializer context; False otherwise.
+    is_friend = serializers.SerializerMethodField()
+
+    def get_city(self, obj):
+        profile = getattr(obj, "profile", None)
+        return getattr(profile, "city", None) or None
+
+    def get_bio(self, obj):
+        profile = getattr(obj, "profile", None)
+        bio = (getattr(profile, "bio", None) or "").strip()
+        return bio or None
+
+    def get_is_friend(self, obj):
+        return obj.id in self.context.get("friend_ids", set())
 
     def get_distance(self, obj):
         """Returns distance in kilometers, rounded to 2 decimal places."""

@@ -189,11 +189,18 @@ class FriendsAPITestCase(TestCase):
         url = reverse('search-users')
         
         # radius=1 means 1km. All users are at Point(0,0) so all are in range.
-        # include_friends=true by default. Self (user1) is also included.
-        # user1(petpal), user2(petpal), user4(petpal) → 3 results
+        # include_friends=true by default. The searcher (user1) is never listed.
+        # user2(sitter), user4(sitter) → 2 results ("petpal" is the legacy name)
         response = self.client.get(url + '?type=petpal&radius=1')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['results']), 3)
+        usernames = {u['username'] for u in response.data['results']}
+        self.assertEqual(usernames, {'user2', 'user4'})
+        # New fields for the "Find Pet Sitters" cards.
+        first = response.data['results'][0]
+        self.assertIn('city', first)
+        self.assertIn('is_friend', first)
+        cities = {u['username']: u['city'] for u in response.data['results']}
+        self.assertEqual(cities, {'user2': 'Dhaka', 'user4': 'Sylhet'})
 
     def test_advanced_search_filters(self):
         # Establish friendships first: user1 is friends with user2 and user3
@@ -203,20 +210,19 @@ class FriendsAPITestCase(TestCase):
         self.client.force_authenticate(user=self.user1)
         url = reverse('search-users')
         
-        # 1. Test "All" users — default include_friends=true, self is included.
-        # Should see user1(self), user2, user3, user4
+        # 1. Test "All" users — default include_friends=true, self is excluded.
+        # Should see user2, user3, user4; friends flagged with is_friend.
         response_all = self.client.get(url + '?radius=1')
         self.assertEqual(response_all.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response_all.data['results']), 4)
+        self.assertEqual(len(response_all.data['results']), 3)
+        flags = {u['username']: u['is_friend'] for u in response_all.data['results']}
+        self.assertEqual(flags, {'user2': True, 'user3': True, 'user4': False})
 
         # 2. Test explicit friend exclusion (include_friends=false)
-        # Self is NOT a "friend" so self still shows. Friends excluded: user2, user3.
-        # Remaining: user1(self), user4
+        # Friends excluded: user2, user3. Self never shows. Remaining: user4.
         response_no_friends = self.client.get(url + '?radius=1&include_friends=false')
-        self.assertEqual(len(response_no_friends.data['results']), 2)
         usernames = [u['username'] for u in response_no_friends.data['results']]
-        self.assertIn('user4', usernames)
-        self.assertIn('user1', usernames)
+        self.assertEqual(usernames, ['user4'])
 
         # 3. Test specific type with friends included (default)
         response_nabors = self.client.get(url + '?type=petnabor&radius=1')
@@ -229,22 +235,19 @@ class FriendsAPITestCase(TestCase):
         url = reverse('search-users')
         
         # Global search (radius=all) — no distance restriction.
-        # include_friends=true by default. Self is included.
-        # Should see user1, user2, user3, user4.
+        # include_friends=true by default. The searcher is never listed.
+        # Should see user2, user3, user4.
         response_all = self.client.get(url + '?radius=all')
-        self.assertEqual(len(response_all.data['results']), 4)
+        self.assertEqual(len(response_all.data['results']), 3)
 
     def test_city_search(self):
         self.client.force_authenticate(user=self.user1)
         url = reverse('search-users')
         
-        # City search — self (user1) is in Dhaka and is included.
-        # user1 and user2 are both in Dhaka.
+        # City search — user1 (the searcher) is in Dhaka but never listed.
         response_dhaka = self.client.get(url + '?radius=all&city=Dhaka')
-        self.assertEqual(len(response_dhaka.data['results']), 2)  # user1 and user2
         usernames = [u['username'] for u in response_dhaka.data['results']]
-        self.assertIn('user1', usernames)
-        self.assertIn('user2', usernames)
+        self.assertEqual(usernames, ['user2'])
         
         response_sylhet = self.client.get(url + '?radius=all&city=Sylhet')
         self.assertEqual(len(response_sylhet.data['results']), 1)

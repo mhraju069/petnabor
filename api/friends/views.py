@@ -475,13 +475,21 @@ class UserSearchView(views.APIView):
             state=state
         )
         
+        # One query for the whole page, so each result can say "Friends".
+        friend_ids = set()
+        for sender_id, receiver_id in Friendship.objects.filter(
+            Q(sender=request.user) | Q(receiver=request.user)
+        ).values_list("sender_id", "receiver_id"):
+            friend_ids.add(receiver_id if sender_id == request.user.id else sender_id)
+        context = {'request': request, 'friend_ids': friend_ids}
+
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(results, request)
         if page is not None:
-            serializer = NearbyUserSerializer(page, many=True, context={'request': request})
+            serializer = NearbyUserSerializer(page, many=True, context=context)
             return paginator.get_paginated_response(serializer.data)
 
-        serializer = NearbyUserSerializer(results, many=True, context={'request': request})
+        serializer = NearbyUserSerializer(results, many=True, context=context)
         return Response(serializer.data)
 
 

@@ -244,8 +244,12 @@ def get_nearby_users(
     if not include_friends:
         exclude_ids.update(friend_ids)
 
-    users_query = User.objects.select_related("profile").filter(is_active=True).exclude(
-        id__in=exclude_ids
+    users_query = (
+        User.objects.select_related("profile")
+        .filter(is_active=True)
+        .exclude(id__in=exclude_ids)
+        # Never list the searcher in their own results.
+        .exclude(id=current_user.id)
     )
 
     if user_type:
