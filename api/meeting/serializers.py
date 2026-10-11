@@ -3,6 +3,8 @@ from .models import Meeting, MeetingFeedback
 from api.users.serializers import Profile_Read
 from django.contrib.auth import get_user_model
 
+from .timing import is_past_everywhere
+
 User = get_user_model()
 
 class CustomUserSerializer(serializers.ModelSerializer):
@@ -29,6 +31,17 @@ class MeetingSerializer(serializers.ModelSerializer):
             'status', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'sender', 'status', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        visit_date = attrs.get('visit_date', getattr(self.instance, 'visit_date', None))
+        visit_time = attrs.get('visit_time', getattr(self.instance, 'visit_time', None))
+        changing_time = self.instance is None or 'visit_date' in attrs or 'visit_time' in attrs
+        if changing_time and visit_date and visit_time and is_past_everywhere(visit_date, visit_time):
+            raise serializers.ValidationError(
+                {"visit_date": "Pick a date and time in the future."}
+            )
+        return attrs
 
 
 class MeetingFeedbackSerializer(serializers.ModelSerializer):

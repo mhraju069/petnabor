@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from .models import Meeting, MeetingFeedback
 from .serializers import MeetingSerializer, MeetingFeedbackSerializer
 from .paginations import MeetingPagination
+from .timing import format_start, has_started_somewhere, is_past_everywhere
 from api.friends.models import Friendship
 
 User = get_user_model()
@@ -139,6 +140,9 @@ class MeetingViewSet(viewsets.ModelViewSet):
         if meeting.status != 'PENDING':
             raise ValidationError({"detail": "Only pending meetings can be accepted."})
 
+        if is_past_everywhere(meeting.visit_date, meeting.visit_time):
+            raise ValidationError({"detail": "This meet-up time has already passed."})
+
         meeting.status = 'ACCEPTED'
         meeting.save()
 
@@ -198,9 +202,21 @@ class MeetingViewSet(viewsets.ModelViewSet):
     def complete(self, request, pk=None):
         meeting = self.get_object()
         
+        if request.user not in (meeting.sender, meeting.receiver):
+            raise PermissionDenied("Only participants can complete the meeting.")
+
         if meeting.status != 'ACCEPTED':
             raise ValidationError({"detail": "Only accepted meetings can be completed."})
-            
+
+        # A meet-up can't be "completed" before it has happened.
+        if not has_started_somewhere(meeting.visit_date, meeting.visit_time):
+            raise ValidationError({
+                "detail": (
+                    "You can mark this meet-up as completed once it has started "
+                    f"({format_start(meeting.visit_date, meeting.visit_time)})."
+                )
+            })
+
         meeting.status = 'COMPLETED'
         meeting.save()
         return Response({'status': 'Meeting completed'})
