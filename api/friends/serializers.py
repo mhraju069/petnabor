@@ -112,6 +112,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
     profile_picture = serializers.SerializerMethodField()
     cover_photo = serializers.SerializerMethodField()
     friendship_status = serializers.SerializerMethodField()
+    stats = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -127,9 +128,15 @@ class PublicUserSerializer(serializers.ModelSerializer):
             "profile_picture",
             "cover_photo",
             "friendship_status",
+            "stats",
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+    def get_stats(self, obj):
+        from api.users.stats import get_user_stats
+
+        return get_user_stats(obj)
 
     def get_profile_picture(self, obj):
         if hasattr(obj, "profile") and obj.profile.profile_picture:
@@ -186,8 +193,13 @@ class SuggestedUserSerializer(PublicUserSerializer):
     mutual_friends_count = serializers.IntegerField(read_only=True)
     score = serializers.SerializerMethodField()
 
+    # Lists of suggestions: skip the per-user profile counters (3 queries each).
+    stats = None
+
     class Meta(PublicUserSerializer.Meta):
-        fields = PublicUserSerializer.Meta.fields + ["mutual_friends_count", "score"]
+        fields = [
+            f for f in PublicUserSerializer.Meta.fields if f != "stats"
+        ] + ["mutual_friends_count", "score"]
 
     def get_score(self, obj):
         mutual_count = getattr(obj, "mutual_friends_count", 0)

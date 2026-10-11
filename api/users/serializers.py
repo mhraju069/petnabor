@@ -10,6 +10,7 @@ from rest_framework import serializers
 
 from .models import Profile, UserTypes
 from .roles import MEMBER_ROLES, MemberRoleField, normalize_role
+from .stats import get_user_stats
 from .validators import (
     validate_email_format,
     validate_password_strength,
@@ -234,6 +235,7 @@ class UserSerializer(serializers.ModelSerializer):
     # Plain CharField so validate_user_type sees legacy names (petpal...)
     # before choice validation would reject them.
     user_type = serializers.CharField(required=False)
+    stats = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -260,6 +262,7 @@ class UserSerializer(serializers.ModelSerializer):
             "profile",
             "username",
             "updated_at",
+            "stats",
         ]
         read_only_fields = [
             "id",
@@ -276,6 +279,9 @@ class UserSerializer(serializers.ModelSerializer):
             "firebase_uid",
             "username",
         ]
+
+    def get_stats(self, obj):
+        return get_user_stats(obj)
 
     def validate_user_type(self, value):
         role = normalize_role(value)

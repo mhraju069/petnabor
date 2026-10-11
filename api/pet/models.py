@@ -14,12 +14,37 @@ class WeightTypes(models.TextChoices):
     KG = 'kg', 'Kilograms'
     LB = 'lb', 'Pounds'
 
+
+class PetGender(models.TextChoices):
+    MALE = 'male', 'Male'
+    FEMALE = 'female', 'Female'
+
+
+# Tags a pet owner can pick to describe temperament (validated in the serializer).
+TEMPERAMENT_TAGS = (
+    "friendly_with_dogs",
+    "friendly_with_cats",
+    "good_with_kids",
+    "playful",
+    "calm",
+    "energetic",
+    "shy",
+    "anxious",
+    "house_trained",
+    "leash_trained",
+)
+
 class PetProfile(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='pets')
     
     pet_name = models.CharField(max_length=100)
-    pet_type = models.CharField(max_length=50) 
+    pet_type = models.CharField(max_length=50)  # "Dog" / "Cat"
+    breed = models.CharField(max_length=100, blank=True, default="")
+    gender = models.CharField(max_length=10, choices=PetGender.choices, blank=True, default="")
+    # None = owner hasn't said.
+    is_spayed_neutered = models.BooleanField(null=True, blank=True)
+    temperament = models.JSONField(default=list, blank=True)
     size = models.CharField(max_length=50) 
     weight = models.DecimalField(max_digits=5, decimal_places=2)
     weight_type = models.CharField(max_length=10, choices=WeightTypes.choices, default=WeightTypes.KG)
