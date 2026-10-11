@@ -8,12 +8,17 @@ Design decisions:
 - All PKs are UUIDs for global uniqueness across services.
 """
 
+import logging
 import os
 import uuid
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────
@@ -218,3 +223,19 @@ class StoryReply(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user} replied to Story {self.story_id}"
+
+
+@receiver(post_delete, sender=Story)
+def delete_story_media_file(sender, instance, **kwargs):
+    """Remove the story's file from storage (Cloudinary) once the row is deleted."""
+    if not instance.media:
+        return
+    storage, name = instance.media.storage, instance.media.name
+    transaction.on_commit(lambda: _safe_delete_file(storage, name))
+
+
+def _safe_delete_file(storage, name):
+    try:
+        storage.delete(name)
+    except Exception:
+        logger.exception("Failed to delete story media %s from storage", name)

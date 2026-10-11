@@ -34,7 +34,7 @@ services:
 
   celery:
     build: .
-    command: celery -A config worker -l info
+    command: celery -A config worker -B -l info
     volumes:
       - .:/app
       - tmp_uploads_volume:/app/tmp_uploads

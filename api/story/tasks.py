@@ -1,6 +1,7 @@
 import logging
 
 from celery import shared_task
+from django.utils import timezone
 
 from api.media_utils import compress_image_to_webp
 from .models import Story, StoryMediaTypeChoices
@@ -34,3 +35,22 @@ def process_story_media_task(self, story_id: str):
     except Exception as exc:
         logger.exception("Failed to process story media for %s: %s", story_id, exc)
         raise self.retry(exc=exc)
+
+
+@shared_task
+def delete_expired_stories(batch_size: int = 200):
+    """
+    Hard-delete expired stories. The post_delete signal on Story removes each
+    story's media from storage (Cloudinary). Runs in batches; re-queues itself
+    if more remain.
+    """
+    ids = list(
+        Story.objects.filter(expires_at__lte=timezone.now())
+        .values_list("id", flat=True)[:batch_size]
+    )
+    for story in Story.objects.filter(id__in=ids):
+        story.delete()  # per-instance so post_delete fires with the file name
+
+    if len(ids) == batch_size:
+        delete_expired_stories.delay(batch_size)
+    return len(ids)
