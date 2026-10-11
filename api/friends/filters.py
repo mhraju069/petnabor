@@ -1,3 +1,5 @@
+from api.users.roles import MEMBER_ROLES, normalize_role
+
 
 class UserFilter:
     """
@@ -9,8 +11,8 @@ class UserFilter:
 
     def get_user_type(self):
         """Returns the user type to filter by, or None for all."""
-        u_type = self.params.get('type')
-        if u_type in ['petpal', 'petnabor']:
+        u_type = normalize_role(self.params.get('type'))
+        if u_type in MEMBER_ROLES:
             return u_type
         return None
 

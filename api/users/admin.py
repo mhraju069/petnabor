@@ -142,15 +142,17 @@ class UserAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     @display(
         description=_("User Type"),
         label={
-            "petnabor": "info",
-            "petpal": "success",
+            "Pet Parent": "info",
+            "Pet Sitter": "success",
+            "Vendor": "warning",
+            "Admin": "danger",
             "vendor": "warning",
             "admin": "danger",
         },
         ordering="user_type",
     )
     def display_user_type(self, obj):
-        return obj.user_type.capitalize() if obj.user_type else "—"
+        return obj.get_user_type_display() if obj.user_type else "—"
 
     @display(
         description=_("Verified"),

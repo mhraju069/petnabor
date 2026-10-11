@@ -26,6 +26,7 @@ from .serializers import (
     SuggestedUserSerializer
 )
 from django.contrib.auth import get_user_model
+from api.users.roles import MEMBER_ROLES, normalize_role
 from . import services
 from .paginations import FriendRequestPagination, FriendPagination, StandardResultsSetPagination
 from .filters import UserFilter
@@ -321,7 +322,7 @@ class BlockUserView(views.APIView):
                 location=OpenApiParameter.QUERY,
                 description="Filter friends by user group.",
                 required=False,
-                enum=["petpals", "petnabors"],
+                enum=["petsitters", "petparents"],
             ),
             OpenApiParameter(
                 name="page",
@@ -371,18 +372,15 @@ class FriendListView(generics.ListAPIView):
                 | Q(receiver=user, sender_id__in=exclude_ids)
             )
 
-        friend_type = self.request.query_params.get("type")  # 'petpals' or 'petnabors'
+        # 'petsitters' or 'petparents' (legacy 'petpals' / 'petnabors' still work)
+        friend_type = self.request.query_params.get("type")
         if friend_type:
-            # We filter based on the type of the friend (the other user)
-            if friend_type == "petpals":
+            role = normalize_role(friend_type.rstrip("s"))
+            if role in MEMBER_ROLES:
+                # Filter on the type of the friend (the other user).
                 queryset = queryset.filter(
-                    Q(sender=user, receiver__user_type="petpal")
-                    | Q(receiver=user, sender__user_type="petpal")
-                )
-            elif friend_type == "petnabors":
-                queryset = queryset.filter(
-                    Q(sender=user, receiver__user_type="petnabor")
-                    | Q(receiver=user, sender__user_type="petnabor")
+                    Q(sender=user, receiver__user_type=role)
+                    | Q(receiver=user, sender__user_type=role)
                 )
 
         return queryset
@@ -406,7 +404,7 @@ class UserSearchView(views.APIView):
                 location=OpenApiParameter.QUERY,
                 description="User type filter.",
                 required=False,
-                enum=["petpal", "petnabor"],
+                enum=["petsitter", "petparent"],
             ),
             OpenApiParameter(
                 name="radius",

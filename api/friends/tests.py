@@ -23,7 +23,7 @@ class FriendsAPITestCase(TestCase):
             password="testpassword",
             first_name="User", 
             last_name="One",
-            user_type=UserTypes.PETPAL
+            user_type=UserTypes.PET_SITTER
         )
         self.user2 = User.objects.create_user(
             email="user2@example.com", 
@@ -32,7 +32,7 @@ class FriendsAPITestCase(TestCase):
             password="testpassword",
             first_name="User", 
             last_name="Two",
-            user_type=UserTypes.PETPAL
+            user_type=UserTypes.PET_SITTER
         )
         self.user3 = User.objects.create_user(
             email="user3@example.com", 
@@ -41,7 +41,7 @@ class FriendsAPITestCase(TestCase):
             password="testpassword",
             first_name="User", 
             last_name="Three",
-            user_type=UserTypes.PETNABOR
+            user_type=UserTypes.PET_PARENT
         )
         self.user4 = User.objects.create_user(
             email="user4@example.com", 
@@ -50,7 +50,7 @@ class FriendsAPITestCase(TestCase):
             password="testpassword",
             first_name="User", 
             last_name="Four",
-            user_type=UserTypes.PETPAL
+            user_type=UserTypes.PET_SITTER
         )
         
         for user in [self.user1, self.user2, self.user3, self.user4]:
@@ -332,7 +332,7 @@ class FriendsAPITestCase(TestCase):
         # Create a 5th user
         user5 = User.objects.create_user(
             email="user5@example.com", username="user5", phone="555555555", password="test",
-            first_name="User", last_name="Five", user_type=UserTypes.PETPAL
+            first_name="User", last_name="Five", user_type=UserTypes.PET_SITTER
         )
         Profile.objects.update_or_create(user=user5, defaults={'location_point': Point(0.0, 0.0)})
         

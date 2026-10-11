@@ -67,7 +67,7 @@ def dashboard_callback(request, context: dict) -> dict:
 
     All queries are lightweight aggregates — no N+1 issues.
     """
-    from .models import User
+    from .models import User, UserTypes
 
     now = timezone.now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -156,7 +156,11 @@ def dashboard_callback(request, context: dict) -> dict:
         .annotate(count=Count("id"))
         .order_by("-count")
     )
-    user_type_labels = [row["user_type"].capitalize() for row in user_type_qs]
+    type_names = dict(UserTypes.choices)
+    user_type_labels = [
+        str(type_names.get(row["user_type"], row["user_type"].capitalize()))
+        for row in user_type_qs
+    ]
     user_type_data = [row["count"] for row in user_type_qs]
 
     # ── Top pet types ──────────────────────────────────────────────────────────

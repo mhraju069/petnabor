@@ -49,8 +49,10 @@ class CustomUserManager(BaseUserManager):
 
 
 class UserTypes(models.TextChoices):
-    PETNABOR = "petnabor", "Petnabor"
-    PETPAL = "petpal", "Petpal"
+    # Member roles users pick themselves (see users/roles.py).
+    PET_PARENT = "petparent", "Pet Parent"
+    PET_SITTER = "petsitter", "Pet Sitter"
+    # Staff-assigned only.
     VENDOR = "vendor", "Vendor"
     ADMIN = "admin", "Admin"
 
@@ -71,7 +73,7 @@ class User(AbstractUser):
     last_name = models.CharField(max_length=150, blank=True, null=True)
 
     user_type = models.CharField(
-        max_length=20, choices=UserTypes.choices, default=UserTypes.PETNABOR
+        max_length=20, choices=UserTypes.choices, default=UserTypes.PET_PARENT
     )
     agree_to_terms_and_conditions = models.BooleanField(default=False)
     ai_data_consent = models.BooleanField(default=False)

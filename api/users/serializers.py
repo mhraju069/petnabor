@@ -8,7 +8,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
 from rest_framework import serializers
 
-from .models import Profile
+from .models import Profile, UserTypes
+from .roles import MEMBER_ROLES, MemberRoleField, normalize_role
 from .validators import (
     validate_email_format,
     validate_password_strength,
@@ -28,7 +29,7 @@ class SignupSerializer(serializers.Serializer):
     password = serializers.CharField(required=True, write_only=True, min_length=8)
     first_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
     last_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
-    user_type = serializers.CharField(required=False, default="petnabor")
+    user_type = MemberRoleField(required=False, default=UserTypes.PET_PARENT)
     agree_to_terms_and_conditions = serializers.BooleanField(
         required=False, default=False
     )
@@ -169,7 +170,7 @@ class FirebaseTokenSerializer(serializers.Serializer):
     id_token = serializers.CharField(required=True, help_text="Firebase ID Token")
     first_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
     last_name = serializers.CharField(required=False, allow_blank=True, max_length=150)
-    user_type = serializers.CharField(required=False, default="petnabor")
+    user_type = MemberRoleField(required=False, default=UserTypes.PET_PARENT)
     agree_to_terms_and_conditions = serializers.BooleanField(
         required=False, default=False
     )
@@ -230,6 +231,9 @@ class Profile_Read(serializers.ModelSerializer):
 
 class UserSerializer(serializers.ModelSerializer):
     profile = Profile_Read(read_only=True)
+    # Plain CharField so validate_user_type sees legacy names (petpal...)
+    # before choice validation would reject them.
+    user_type = serializers.CharField(required=False)
 
     class Meta:
         model = User
@@ -272,6 +276,22 @@ class UserSerializer(serializers.ModelSerializer):
             "firebase_uid",
             "username",
         ]
+
+    def validate_user_type(self, value):
+        role = normalize_role(value)
+        request = self.context.get("request")
+        if request is not None and request.user.is_staff:
+            if role not in UserTypes.values:
+                raise serializers.ValidationError("Unknown user_type.")
+            return role
+
+        current = getattr(self.instance, "user_type", None)
+        if role not in MEMBER_ROLES or (current and current not in MEMBER_ROLES):
+            # Blocks self-promotion to vendor/admin and self-demotion from them.
+            raise serializers.ValidationError(
+                "You can only switch between Pet Parent and Pet Sitter."
+            )
+        return role
 
 
 class ProfileSerializer(serializers.ModelSerializer):
