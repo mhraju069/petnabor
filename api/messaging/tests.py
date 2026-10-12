@@ -570,3 +570,98 @@ class MessageCursorPaginationTest(MessagingBaseTestCase):
         self.assertEqual(len(response.data["results"]), 50)
         capped = self.client.get(self.url, {"page_size": 1000})
         self.assertEqual(len(capped.data["results"]), self.TOTAL)  # cap is 100
+
+
+# ──────────────────────────────────────────────
+# Photo messages
+# ──────────────────────────────────────────────
+
+import shutil
+import tempfile
+from io import BytesIO
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
+
+_TMP_MEDIA = tempfile.mkdtemp()
+
+
+def _png(name="photo.png"):
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(buf, format="PNG")
+    return SimpleUploadedFile(name, buf.getvalue(), content_type="image/png")
+
+
+@override_settings(
+    STORAGES={
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": _TMP_MEDIA, "base_url": "/media/"},
+        },
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+)
+@patch("api.messaging.tasks.notify_new_message")
+class PhotoMessageTest(MessagingBaseTestCase):
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(_TMP_MEDIA, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        super().setUp()
+        self.make_friends(self.alice, self.bob)
+        from .services import get_or_create_direct_thread
+
+        self.thread, _ = get_or_create_direct_thread(self.alice, self.bob)
+        self.url = reverse("message-list-create", kwargs={"thread_id": self.thread.id})
+        self.client.force_authenticate(self.alice)
+
+    def test_upload_photo_creates_image_message(self, _mock):
+        response = self.client.post(self.url, {"media": _png()}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["message_type"], MessageTypes.IMAGE)
+        self.assertTrue(response.data["media_url"])
+
+        message = Message.objects.get()
+        self.assertTrue(message.media_file.name.startswith("chat_media/"))
+        self.thread.refresh_from_db()
+        self.assertEqual(self.thread.last_message_text, "📷 Photo")
+
+    def test_photo_with_caption(self, _mock):
+        response = self.client.post(
+            self.url, {"media": _png(), "text_content": "Look at him!"}, format="multipart"
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["text_content"], "Look at him!")
+        self.thread.refresh_from_db()
+        self.assertEqual(self.thread.last_message_text, "📷 Look at him!")
+
+    def test_non_image_file_is_rejected(self, _mock):
+        bad = SimpleUploadedFile("notes.png", b"not an image", content_type="image/png")
+        response = self.client.post(self.url, {"media": bad}, format="multipart")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Message.objects.count(), 0)
+
+    def test_non_participant_cannot_upload(self, _mock):
+        self.client.force_authenticate(self.carol)
+        response = self.client.post(self.url, {"media": _png()}, format="multipart")
+        self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertEqual(Message.objects.count(), 0)
+
+    def test_delete_for_everyone_clears_photo(self, _mock):
+        self.client.post(self.url, {"media": _png()}, format="multipart")
+        message = Message.objects.get()
+        detail = reverse(
+            "message-detail", kwargs={"thread_id": self.thread.id, "message_id": message.id}
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(detail)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted_for_everyone)
+        self.assertFalse(message.media_file)
+        self.assertIsNone(message.media_url)

@@ -9,10 +9,16 @@ Designed for 1M+ users:
   - Soft-delete via is_deleted_for_everyone (preserves reply references)
 """
 
+import os
 import uuid
 
 from django.conf import settings
 from django.db import models
+
+
+def chat_media_path(instance, filename):
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
+    return os.path.join("chat_media/", f"{uuid.uuid4()}.{ext}")
 
 
 # ──────────────────────────────────────────────
@@ -152,6 +158,7 @@ class Message(models.Model):
     """A single message inside a ChatThread."""
 
     MAX_TEXT_LENGTH = 2000
+    MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     thread = models.ForeignKey(
@@ -175,6 +182,10 @@ class Message(models.Model):
     )
     text_content = models.TextField(null=True, blank=True)
     media_url = models.URLField(max_length=512, null=True, blank=True)
+    # Uploaded attachment (photos sent from the app). `media_url` is filled
+    # with its URL so readers only ever need media_url; the file itself is
+    # removed from storage by django-cleanup when cleared or deleted.
+    media_file = models.FileField(upload_to=chat_media_path, max_length=500, null=True, blank=True)
     # Extra structured data for special message types (e.g. STORY_REPLY:
     # story_id, story_media, story_media_type, story_text, ...).
     metadata = models.JSONField(null=True, blank=True)

@@ -143,10 +143,20 @@ class SendMessageSerializer(serializers.Serializer):
         allow_blank=False,
     )
     media_url = serializers.URLField(max_length=512, required=False)
+    # A photo uploaded with the message (multipart). Implies message_type=IMAGE.
+    media = serializers.ImageField(required=False)
     reply_to_id = serializers.UUIDField(required=False)
 
     def validate(self, data):
         msg_type = data.get("message_type", MessageTypes.TEXT)
+        media = data.get("media")
+        if media is not None:
+            if media.size > Message.MAX_IMAGE_BYTES:
+                raise serializers.ValidationError(
+                    {"media": f"Photos must be under {Message.MAX_IMAGE_BYTES // (1024 * 1024)} MB."}
+                )
+            data["message_type"] = MessageTypes.IMAGE
+            return data
         if msg_type == MessageTypes.TEXT and not data.get("text_content"):
             raise serializers.ValidationError(
                 {"text_content": "Required for TEXT messages."}

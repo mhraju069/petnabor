@@ -273,6 +273,7 @@ class MessageListCreateView(views.APIView):
             text_content=data.get("text_content"),
             message_type=data.get("message_type", MessageTypes.TEXT),
             media_url=data.get("media_url"),
+            media_file=data.get("media"),
             reply_to_id=data.get("reply_to_id"),
         )
         serializer = MessageSerializer(message, context={"request": request})

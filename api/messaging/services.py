@@ -272,6 +272,7 @@ def send_message(
     reply_to_id=None,
     metadata=None,
     enforce_permission=True,
+    media_file=None,
 ):
     """
     Send a message in a thread.
@@ -318,8 +319,12 @@ def send_message(
         if len(text_content) > Message.MAX_TEXT_LENGTH:
             raise ValidationError(f"Message cannot exceed {Message.MAX_TEXT_LENGTH} characters.")
     else:
-        if not media_url:
-            raise ValidationError("media_url is required for non-text messages.")
+        if not media_url and not media_file:
+            raise ValidationError("A photo (or media_url) is required for non-text messages.")
+        # Optional caption on photos.
+        text_content = (text_content or "").strip() or None
+        if text_content and len(text_content) > Message.MAX_TEXT_LENGTH:
+            raise ValidationError(f"Caption cannot exceed {Message.MAX_TEXT_LENGTH} characters.")
 
     # Validate reply_to
     reply_to = None
@@ -336,11 +341,18 @@ def send_message(
         media_url=media_url,
         reply_to=reply_to,
         metadata=metadata,
+        media_file=media_file,
     )
+    if media_file:
+        # Readers (serializer, WebSocket, app) only use media_url.
+        message.media_url = message.media_file.url
+        message.save(update_fields=["media_url"])
 
     # Update denormalized inbox fields
     if message_type == MessageTypes.STORY_REPLY:
         preview = f"Story reply: {text_content}"[:255]
+    elif message_type == MessageTypes.IMAGE:
+        preview = (f"📷 {text_content}" if text_content else "📷 Photo")[:255]
     else:
         preview = (text_content or message_type)[:255]
     ChatThread.objects.filter(id=thread.id).update(
@@ -470,7 +482,10 @@ def delete_message_for_everyone(user, thread_id, message_id):
     message.is_deleted_for_everyone = True
     message.text_content = None
     message.media_url = None
-    message.save(update_fields=["is_deleted_for_everyone", "text_content", "media_url", "updated_at"])
+    message.media_file = None  # django-cleanup deletes the file after commit
+    message.save(
+        update_fields=["is_deleted_for_everyone", "text_content", "media_url", "media_file", "updated_at"]
+    )
     return message
 
 
@@ -487,6 +502,12 @@ def delete_messages_bulk(user, thread_id, message_ids):
         sender=user,
         is_deleted_for_everyone=False,
     )
+
+    # Photos are cleared per instance so django-cleanup removes their files
+    # (queryset.update() skips model signals).
+    for message in messages.exclude(media_file="").exclude(media_file__isnull=True):
+        message.media_file = None
+        message.save(update_fields=["media_file"])
 
     count = messages.update(
         is_deleted_for_everyone=True,
