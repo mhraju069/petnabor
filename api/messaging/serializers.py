@@ -84,13 +84,14 @@ class ReplyPreviewSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Message
-        fields = ["id", "sender", "message_type", "text_content", "media_url"]
+        fields = ["id", "sender", "message_type", "text_content", "media_url", "metadata"]
         read_only_fields = [
             "id",
             "sender",
             "message_type",
             "text_content",
             "media_url",
+            "metadata",
         ]
 
 
@@ -107,6 +108,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "message_type",
             "text_content",
             "media_url",
+            "metadata",
             "reply_to",
             "is_read",
             "is_edited",
@@ -118,6 +120,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "id",
             "sender",
             "thread",
+            "metadata",
             "is_read",
             "is_edited",
             "is_deleted_for_everyone",
@@ -129,8 +132,9 @@ class MessageSerializer(serializers.ModelSerializer):
 class SendMessageSerializer(serializers.Serializer):
     """Input serializer for creating a new message."""
 
+    # STORY_REPLY is created by the server only (POST /stories/{id}/reply/).
     message_type = serializers.ChoiceField(
-        choices=MessageTypes.choices,
+        choices=[c for c in MessageTypes.choices if c[0] != MessageTypes.STORY_REPLY],
         default=MessageTypes.TEXT,
     )
     text_content = serializers.CharField(

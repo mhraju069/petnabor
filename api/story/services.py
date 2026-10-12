@@ -310,10 +310,13 @@ class StoryInteractionService:
         return deleted_count > 0
 
     @staticmethod
-    @transaction.atomic
     def reply_to_story(story: Story, user: User, reply_text: str) -> StoryReply:
         """
-        Creates a text reply to a story and notifies the story's author.
+        Creates a text reply to a story and delivers it to the author's chat
+        as a STORY_REPLY message (which also sends the chat push).
+
+        The reply is saved even if the chat message can't be created; in that
+        case the author still gets the story-reply notification.
         """
         reply = StoryReply.objects.create(
             story=story,
@@ -321,9 +324,9 @@ class StoryInteractionService:
             reply_text=reply_text,
         )
 
-        # Notify story author of the reply (non-blocking)
         if story.author_id != user.id:
-            _notify_story_author_of_reply(story, user)
+            if not _send_story_reply_message(story, user, reply_text):
+                _notify_story_author_of_reply(story, user)
 
         return reply
 
@@ -370,6 +373,50 @@ def _annotate_story_queryset(qs: QuerySet, requesting_user: User) -> QuerySet:
         )
         .annotate(has_unseen=~Exists(already_viewed_subquery))
     )
+
+
+def story_snapshot(story: Story) -> dict:
+    """What a chat message needs to show the story after it has expired."""
+    media_url = None
+    if story.media:
+        try:
+            media_url = story.media.url
+        except Exception:
+            media_url = None
+    return {
+        "story_id": str(story.id),
+        "story_author_id": str(story.author_id),
+        "story_media_type": story.media_type,
+        "story_media": media_url,
+        "story_text": (story.text_content or "")[:200] or None,
+        "story_bg_color": story.bg_color or None,
+        "story_expires_at": story.expires_at.isoformat() if story.expires_at else None,
+    }
+
+
+def _send_story_reply_message(story: Story, replier: User, reply_text: str) -> bool:
+    """
+    Posts the reply into the direct chat between replier and story author.
+    Returns False (and logs) if it couldn't be delivered.
+    """
+    try:
+        from api.messaging.models import MessageTypes
+        from api.messaging.services import get_or_create_direct_thread, send_message
+
+        thread, _ = get_or_create_direct_thread(replier, story.author)
+        send_message(
+            sender=replier,
+            thread_id=thread.id,
+            text_content=reply_text,
+            message_type=MessageTypes.STORY_REPLY,
+            metadata=story_snapshot(story),
+            # Seeing the story already passed its privacy and block checks.
+            enforce_permission=False,
+        )
+        return True
+    except Exception:
+        logger.exception("Failed to post story reply %s to chat", story.id)
+        return False
 
 
 def _notify_story_author_of_reaction(story: Story, reactor: User) -> None:

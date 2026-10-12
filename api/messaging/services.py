@@ -263,7 +263,16 @@ def get_messages_in_thread(user, thread_id):
 
 
 @transaction.atomic
-def send_message(sender, thread_id, text_content=None, message_type=MessageTypes.TEXT, media_url=None, reply_to_id=None):
+def send_message(
+    sender,
+    thread_id,
+    text_content=None,
+    message_type=MessageTypes.TEXT,
+    media_url=None,
+    reply_to_id=None,
+    metadata=None,
+    enforce_permission=True,
+):
     """
     Send a message in a thread.
 
@@ -273,6 +282,10 @@ def send_message(sender, thread_id, text_content=None, message_type=MessageTypes
     4. Create Message.
     5. Update thread denormalized fields.
     6. Dispatch async push notification.
+
+    `enforce_permission=False` skips the friends/prior-thread rule (blocks
+    are still enforced) — used for server-created messages such as story
+    replies, where viewing the story already passed the privacy checks.
 
     Returns the newly created Message.
     """
@@ -286,11 +299,19 @@ def send_message(sender, thread_id, text_content=None, message_type=MessageTypes
             .exclude(user=sender)
             .first()
         )
-        if other and not can_message(sender, other.user):
-            raise PermissionDenied("You are not allowed to send messages to this user.")
+        if other:
+            if enforce_permission:
+                allowed = can_message(sender, other.user)
+            else:
+                allowed = not UserBlock.objects.filter(
+                    Q(blocker=sender, blocked_user=other.user)
+                    | Q(blocker=other.user, blocked_user=sender)
+                ).exists()
+            if not allowed:
+                raise PermissionDenied("You are not allowed to send messages to this user.")
 
     # Validate content
-    if message_type == MessageTypes.TEXT:
+    if message_type in (MessageTypes.TEXT, MessageTypes.STORY_REPLY):
         if not text_content or not text_content.strip():
             raise ValidationError("Text content cannot be empty.")
         text_content = text_content.strip()
@@ -314,10 +335,14 @@ def send_message(sender, thread_id, text_content=None, message_type=MessageTypes
         text_content=text_content,
         media_url=media_url,
         reply_to=reply_to,
+        metadata=metadata,
     )
 
     # Update denormalized inbox fields
-    preview = (text_content or message_type)[:255]
+    if message_type == MessageTypes.STORY_REPLY:
+        preview = f"Story reply: {text_content}"[:255]
+    else:
+        preview = (text_content or message_type)[:255]
     ChatThread.objects.filter(id=thread.id).update(
         last_message_text=preview,
         last_message_timestamp=message.created_at,
@@ -366,6 +391,7 @@ def send_message(sender, thread_id, text_content=None, message_type=MessageTypes
             "message_type": message.message_type,
             "text_content": message.text_content,
             "media_url": message.media_url,
+            "metadata": message.metadata,
             "reply_to": None,
             "is_read": message.is_read,
             "created_at": message.created_at.isoformat(),

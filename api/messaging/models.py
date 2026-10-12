@@ -37,6 +37,9 @@ class MessageTypes(models.TextChoices):
     AUDIO = "AUDIO", "Audio"
     FILE = "FILE", "File"
     SYSTEM = "SYSTEM", "System"
+    # Created by the server when someone replies to a story; `metadata`
+    # holds a snapshot of the story (it expires, the message doesn't).
+    STORY_REPLY = "STORY_REPLY", "Story reply"
 
 
 # ──────────────────────────────────────────────
@@ -165,13 +168,16 @@ class Message(models.Model):
         related_name="sent_messages",
     )
     message_type = models.CharField(
-        max_length=10,
+        max_length=20,
         choices=MessageTypes.choices,
         default=MessageTypes.TEXT,
         db_index=True,
     )
     text_content = models.TextField(null=True, blank=True)
     media_url = models.URLField(max_length=512, null=True, blank=True)
+    # Extra structured data for special message types (e.g. STORY_REPLY:
+    # story_id, story_media, story_media_type, story_text, ...).
+    metadata = models.JSONField(null=True, blank=True)
 
     # Reply threading
     reply_to = models.ForeignKey(

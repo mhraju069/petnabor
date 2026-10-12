@@ -240,3 +240,92 @@ class StoryInteractionTestCase(StoryBaseTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = self.get_data(response)
         self.assertEqual(len(data), 1)
+
+
+class StoryReplyChatMessageTestCase(StoryBaseTestCase):
+    """A story reply lands in the author's chat as a STORY_REPLY message."""
+
+    def setUp(self):
+        super().setUp()
+        self.story = Story.objects.create(
+            author=self.alice,
+            text_content="Walk in the park",
+            bg_color="#3E77BC",
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+
+    def _reply(self, user, text="So cute!"):
+        self.client.force_authenticate(user)
+        return self.client.post(
+            reverse("story-reply", kwargs={"pk": self.story.id}),
+            {"reply_text": text},
+            format="json",
+        )
+
+    def test_reply_creates_story_reply_message_in_direct_thread(self):
+        from api.messaging.models import Message, MessageTypes, ThreadTypes
+
+        response = self._reply(self.bob)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        message = Message.objects.get()
+        self.assertEqual(message.message_type, MessageTypes.STORY_REPLY)
+        self.assertEqual(message.sender, self.bob)
+        self.assertEqual(message.text_content, "So cute!")
+        self.assertEqual(message.metadata["story_id"], str(self.story.id))
+        self.assertEqual(message.metadata["story_text"], "Walk in the park")
+        self.assertEqual(message.metadata["story_bg_color"], "#3E77BC")
+
+        thread = message.thread
+        self.assertEqual(thread.thread_type, ThreadTypes.DIRECT)
+        participants = set(thread.participants.values_list("user_id", flat=True))
+        self.assertEqual(participants, {self.alice.id, self.bob.id})
+        self.assertTrue(thread.last_message_text.startswith("Story reply:"))
+
+    def test_replies_reuse_the_existing_thread(self):
+        from api.messaging.models import ChatThread, Message
+
+        self._reply(self.bob, "one")
+        self._reply(self.bob, "two")
+        self.assertEqual(ChatThread.objects.count(), 1)
+        self.assertEqual(Message.objects.count(), 2)
+
+    def test_non_friend_can_reply_to_public_story(self):
+        """Seeing a public story is enough to reply, even without friendship."""
+        from api.messaging.models import Message
+
+        response = self._reply(self.charlie)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Message.objects.filter(sender=self.charlie).count(), 1)
+
+    def test_blocked_user_reply_does_not_create_message(self):
+        from api.friends.models import UserBlock
+        from api.messaging.models import Message
+
+        UserBlock.objects.create(blocker=self.alice, blocked_user=self.bob)
+        response = self._reply(self.bob)
+        # The story itself is hidden from a blocked user.
+        self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertEqual(Message.objects.count(), 0)
+
+    def test_replying_to_own_story_sends_no_message(self):
+        from api.messaging.models import Message
+
+        response = self._reply(self.alice)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Message.objects.count(), 0)
+
+    def test_clients_cannot_send_story_reply_type_directly(self):
+        from api.messaging.models import Message, MessageTypes
+        from api.messaging.services import get_or_create_direct_thread
+
+        self.make_friends(self.alice, self.bob)
+        thread, _ = get_or_create_direct_thread(self.bob, self.alice)
+        self.client.force_authenticate(self.bob)
+        response = self.client.post(
+            reverse("message-list-create", kwargs={"thread_id": thread.id}),
+            {"message_type": MessageTypes.STORY_REPLY, "text_content": "fake"},
+            format="json",
+        )
+        self.assertNotEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Message.objects.count(), 0)
