@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import viewsets, generics, permissions
 from .models import PetProfile
 from .serializers import PetProfileSerializer
@@ -15,14 +16,16 @@ class PetProfileViewSet(viewsets.ModelViewSet):
         if "image" in self.request.FILES:
             from .tasks import process_pet_image_task
 
-            process_pet_image_task.delay(str(pet.id))
+            pet_id = str(pet.id)
+            transaction.on_commit(lambda: process_pet_image_task.delay(pet_id))
 
     def perform_update(self, serializer):
         pet = serializer.save()
         if "image" in self.request.FILES:
             from .tasks import process_pet_image_task
 
-            process_pet_image_task.delay(str(pet.id))
+            pet_id = str(pet.id)
+            transaction.on_commit(lambda: process_pet_image_task.delay(pet_id))
 
 
 class UserPetListView(generics.ListAPIView):

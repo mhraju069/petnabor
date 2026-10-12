@@ -329,3 +329,51 @@ class StoryReplyChatMessageTestCase(StoryBaseTestCase):
         )
         self.assertNotEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Message.objects.count(), 0)
+
+
+class StoryCreateIdempotencyTestCase(StoryBaseTestCase):
+    """A retried upload (same Idempotency-Key) must not create a second story."""
+
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+
+        cache.clear()
+        self.client.force_authenticate(self.alice)
+        self.url = reverse("story-list")
+        self.body = {"media_type": "TEXT", "text_content": "Hello", "privacy": "PUBLIC"}
+
+    def test_same_key_returns_existing_story(self):
+        first = self.client.post(self.url, self.body, format="json", HTTP_IDEMPOTENCY_KEY="abc-1")
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+
+        retry = self.client.post(self.url, self.body, format="json", HTTP_IDEMPOTENCY_KEY="abc-1")
+        self.assertEqual(retry.status_code, status.HTTP_200_OK)
+        self.assertEqual(retry.data["id"], first.data["id"])
+        self.assertEqual(Story.objects.filter(author=self.alice).count(), 1)
+
+    def test_different_keys_create_separate_stories(self):
+        self.client.post(self.url, self.body, format="json", HTTP_IDEMPOTENCY_KEY="k1")
+        self.client.post(self.url, self.body, format="json", HTTP_IDEMPOTENCY_KEY="k2")
+        self.assertEqual(Story.objects.filter(author=self.alice).count(), 2)
+
+    def test_without_key_behaves_as_before(self):
+        self.client.post(self.url, self.body, format="json")
+        self.client.post(self.url, self.body, format="json")
+        self.assertEqual(Story.objects.filter(author=self.alice).count(), 2)
+
+    def test_failed_create_frees_the_key(self):
+        bad = self.client.post(
+            self.url, {"media_type": "TEXT", "privacy": "PUBLIC"}, format="json",
+            HTTP_IDEMPOTENCY_KEY="k3",
+        )
+        self.assertEqual(bad.status_code, status.HTTP_400_BAD_REQUEST)
+        ok = self.client.post(self.url, self.body, format="json", HTTP_IDEMPOTENCY_KEY="k3")
+        self.assertEqual(ok.status_code, status.HTTP_201_CREATED)
+
+    def test_keys_are_per_user(self):
+        self.client.post(self.url, self.body, format="json", HTTP_IDEMPOTENCY_KEY="shared")
+        self.client.force_authenticate(self.bob)
+        response = self.client.post(self.url, self.body, format="json", HTTP_IDEMPOTENCY_KEY="shared")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Story.objects.count(), 2)

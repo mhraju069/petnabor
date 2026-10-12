@@ -67,7 +67,10 @@ class StoryService:
         if story.media_type == StoryMediaTypeChoices.IMAGE and story.media:
             from .tasks import process_story_media_task
 
-            process_story_media_task.delay(str(story.id))
+            # Queue only after the row is committed; a worker that starts
+            # first would find no story and skip compression.
+            story_id = str(story.id)
+            transaction.on_commit(lambda: process_story_media_task.delay(story_id))
 
         return story
 

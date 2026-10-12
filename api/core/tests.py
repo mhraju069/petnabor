@@ -60,3 +60,46 @@ class InfrastructureConfigTests(TestCase):
         
         self.assertFalse(result)
         mock_send_mail.assert_called_once()
+
+
+class AutoMediaCloudinaryStorageDeleteTests(TestCase):
+    """
+    Stored names carry the file extension, Cloudinary public_ids for images
+    and videos don't. delete() must strip it or Cloudinary says "not found"
+    and replaced originals are never removed (duplicate media).
+    """
+
+    def _storage(self):
+        from api.core.storage_backends import AutoMediaCloudinaryStorage
+
+        return AutoMediaCloudinaryStorage()
+
+    def test_image_delete_uses_public_id_without_extension(self):
+        from unittest import mock
+
+        with mock.patch("cloudinary.uploader.destroy", return_value={"result": "ok"}) as destroy:
+            self.assertTrue(self._storage().delete("media/cloudinary/stories/media/abc_x1.jpg"))
+        destroy.assert_called_once_with(
+            "media/cloudinary/stories/media/abc_x1", invalidate=True, resource_type="image"
+        )
+
+    def test_video_delete_uses_public_id_without_extension(self):
+        from unittest import mock
+
+        with mock.patch("cloudinary.uploader.destroy", return_value={"result": "ok"}) as destroy:
+            self._storage().delete("media/cloudinary/stories/media/clip_x1.mp4")
+        destroy.assert_called_once_with(
+            "media/cloudinary/stories/media/clip_x1", invalidate=True, resource_type="video"
+        )
+
+    def test_raw_and_extensionless_names_are_passed_through(self):
+        from unittest import mock
+
+        with mock.patch("cloudinary.uploader.destroy", return_value={"result": "ok"}) as destroy:
+            storage = self._storage()
+            storage.delete("media/cloudinary/docs/file.pdf")
+            storage.delete("media/cloudinary/legacy/abc")
+        self.assertEqual(destroy.call_args_list[0].args[0], "media/cloudinary/docs/file.pdf")
+        self.assertEqual(destroy.call_args_list[0].kwargs["resource_type"], "raw")
+        self.assertEqual(destroy.call_args_list[1].args[0], "media/cloudinary/legacy/abc")
+        self.assertEqual(destroy.call_args_list[1].kwargs["resource_type"], "image")

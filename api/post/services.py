@@ -70,7 +70,8 @@ class MediaService:
         if image_ids:
             from .tasks import process_post_media_task
 
-            process_post_media_task.delay(image_ids)
+            # After commit, so the worker can see the new PostMedia rows.
+            transaction.on_commit(lambda: process_post_media_task.delay(image_ids))
             logger.info("Dispatched media processing for PostMedia ids: %s", image_ids)
 
 

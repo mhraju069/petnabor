@@ -28,6 +28,7 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiParameter, OpenApiTypes
 
 
+from .models import Story
 from .permissions import CanViewStory, IsStoryAuthor
 from .serializers import (
     StoryCreateSerializer,
@@ -122,13 +123,29 @@ class StoryViewSet(viewsets.ModelViewSet):
     # ── Publish ───────────────────────────────────────────────────────────
 
     def create(self, request, *args, **kwargs):
-        """POST /stories/ — publish a new story."""
-        serializer = StoryCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        story = StoryService.publish_story(
-            user=request.user,
-            data=serializer.validated_data,
-        )
+        """
+        POST /stories/ — publish a new story.
+
+        Honours an `Idempotency-Key` header: a retry of an upload that already
+        succeeded returns that story (200) instead of creating a duplicate.
+        """
+        from api.core.idempotency import idempotent_create
+
+        with idempotent_create(request, "story") as idem:
+            if idem.existing_id:
+                story = Story.objects.filter(id=idem.existing_id, author=request.user).first()
+                if story:
+                    return Response(
+                        StoryDetailSerializer(story, context={"request": request}).data,
+                        status=status.HTTP_200_OK,
+                    )
+            serializer = StoryCreateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            story = StoryService.publish_story(
+                user=request.user,
+                data=serializer.validated_data,
+            )
+            idem.remember(story.id)
         return Response(
             StoryDetailSerializer(story, context={"request": request}).data,
             status=status.HTTP_201_CREATED,

@@ -161,16 +161,32 @@ class PostViewSet(viewsets.ModelViewSet):
         )
 
     def create(self, request, *args, **kwargs):
-        """Handles multipart/form-data post creation via service layer."""
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        """
+        Handles multipart/form-data post creation via service layer.
 
-        files = request.FILES.getlist("media")
-        post = PostService.create_post(
-            user=request.user,
-            data=serializer.validated_data,
-            files=files,
-        )
+        Honours an `Idempotency-Key` header: a retry of an upload that already
+        succeeded returns that post (200) instead of creating a duplicate.
+        """
+        from api.core.idempotency import idempotent_create
+
+        with idempotent_create(request, "post") as idem:
+            if idem.existing_id:
+                existing = Post.objects.filter(id=idem.existing_id, author=request.user).first()
+                if existing:
+                    return Response(
+                        PostDetailSerializer(existing, context={"request": request}).data,
+                        status=status.HTTP_200_OK,
+                    )
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            files = request.FILES.getlist("media")
+            post = PostService.create_post(
+                user=request.user,
+                data=serializer.validated_data,
+                files=files,
+            )
+            idem.remember(post.id)
 
         return Response(
             PostDetailSerializer(post, context={"request": request}).data,

@@ -83,6 +83,27 @@ class AutoMediaCloudinaryStorage:
                     saved = f"{saved}.{ext}"
                 return saved
 
+            def _public_id(self, name):
+                # _save() appends the extension to image/video names, but
+                # Cloudinary's public_id for those resource types has none.
+                # Passing the stored name straight to destroy() made every
+                # delete a silent "not found", so replaced originals (the
+                # compress-then-delete-old tasks) piled up as duplicates.
+                ext = _ext(name)
+                if ext and self._get_resource_type(name) in ("image", "video"):
+                    return name[: -(len(ext) + 1)]
+                return name
+
+            def delete(self, name):
+                import cloudinary.uploader
+
+                response = cloudinary.uploader.destroy(
+                    self._public_id(name),
+                    invalidate=True,
+                    resource_type=self._get_resource_type(name),
+                )
+                return response.get("result") == "ok"
+
             def _get_resource_type(self, name):
                 ext = _ext(name)
                 # Extensionless names are legacy image uploads (Cloudinary strips
