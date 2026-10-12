@@ -478,13 +478,23 @@ class FirebaseLoginView(APIView):
 
 
 class UserDetailView(RetrieveUpdateDestroyAPIView):
-    """Current user's details (GET/PUT/PATCH/DELETE)."""
+    """
+    Current user's details (GET/PUT/PATCH) and account deletion (DELETE).
+
+    DELETE permanently deletes the account — see api/users/account_deletion.py.
+    Returns 409 with a message if the user still has tip money to withdraw.
+    """
 
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
         return self.request.user
+
+    def perform_destroy(self, instance):
+        from .account_deletion import delete_account
+
+        delete_account(instance)
 
 
 class ProfileDetailView(RetrieveUpdateAPIView):

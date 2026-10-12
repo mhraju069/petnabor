@@ -1,14 +1,28 @@
 from rest_framework import serializers
 from .models import Meeting, MeetingFeedback
-from api.users.serializers import Profile_Read
+from api.users.models import Profile
 from django.contrib.auth import get_user_model
 
 from .timing import is_past_everywhere
 
 User = get_user_model()
 
+class MeetingProfileSerializer(serializers.ModelSerializer):
+    """
+    What the other person in a meeting may see of a profile. Deliberately
+    NOT the full profile: home address, apartment, zipcode, exact location,
+    date of birth and referral code used to leak to meeting participants.
+    The meeting's own address fields carry where to meet.
+    """
+
+    class Meta:
+        model = Profile
+        fields = ["profile_picture", "city", "state", "bio"]
+        read_only_fields = fields
+
+
 class CustomUserSerializer(serializers.ModelSerializer):
-    profile = Profile_Read(read_only=True)
+    profile = MeetingProfileSerializer(read_only=True)
 
     class Meta:
         model = User

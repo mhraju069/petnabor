@@ -36,16 +36,19 @@ class NearbyUserSerializer(serializers.Serializer):
         return obj.id in self.context.get("friend_ids", set())
 
     def get_distance(self, obj):
-        """Returns distance in kilometers, rounded to 2 decimal places."""
+        """
+        Distance in km, coarsened for privacy: 0.5 km steps, never below
+        0.5. Exact distances let anyone triangulate where someone lives by
+        checking from a few spots.
+        """
         distance = getattr(obj, "distance", None)
         if distance is None:
             return None
-        if hasattr(distance, "km"):
-            return round(float(distance.km), 2)
         try:
-            return round(float(distance), 2)
+            km = float(distance.km) if hasattr(distance, "km") else float(distance)
         except (TypeError, ValueError):
             return None
+        return max(0.5, round(km * 2) / 2)
 
     def get_profile_picture(self, obj):
         if hasattr(obj, "profile") and obj.profile.profile_picture:
@@ -56,11 +59,16 @@ class NearbyUserSerializer(serializers.Serializer):
         return None
 
     def get_location_point(self, obj):
-        """Returns [latitude, longitude] to match frontend convention."""
+        """
+        Returns [latitude, longitude] to match frontend convention, rounded to
+        2 decimals (~1 km) so the map shows a neighbourhood, never a home.
+        This serializer describes *other* users (nearby, friend requests,
+        meetings); a user's own exact point comes from their profile.
+        """
         try:
             point = obj.profile.location_point
             if point:
-                return [round(point.y, 4), round(point.x, 4)]  # [lat, lng]
+                return [round(point.y, 2), round(point.x, 2)]  # [lat, lng]
         except Exception:
             pass
         return None

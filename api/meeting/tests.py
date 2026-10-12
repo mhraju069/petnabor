@@ -180,3 +180,45 @@ class MeetingTimingRulesTest(TestCase):
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('visit_date', response.data)
+
+
+class MeetingParticipantPrivacyTest(TestCase):
+    """Meeting participants must not see each other's private profile data."""
+
+    def test_participant_profiles_hide_address_and_birthday(self):
+        from datetime import date, time, timedelta
+
+        from django.contrib.auth import get_user_model
+        from django.contrib.gis.geos import Point
+
+        from api.users.models import Profile
+        from .models import Meeting
+        from .serializers import MeetingSerializer
+
+        User = get_user_model()
+        alice = User.objects.create_user(
+            email="pa@test.com", username="pa", phone="10000201", password="pass", is_verified=True
+        )
+        bob = User.objects.create_user(
+            email="pb@test.com", username="pb", phone="10000202", password="pass", is_verified=True
+        )
+        profile, _ = Profile.objects.get_or_create(user=alice)
+        profile.address_street = "12 Secret St"
+        profile.zipcode = "10001"
+        profile.city = "Springfield"
+        profile.date_of_birth = date(1990, 1, 1)
+        profile.location_point = Point(-73.9, 40.7, srid=4326)
+        profile.save()
+
+        meeting = Meeting.objects.create(
+            sender=alice,
+            receiver=bob,
+            visit_date=date.today() + timedelta(days=2),
+            visit_time=time(10, 0),
+        )
+        data = MeetingSerializer(meeting).data
+        sender_profile = data["sender"]["profile"]
+
+        self.assertEqual(sender_profile["city"], "Springfield")
+        for private in ("address_street", "apartment", "zipcode", "location_point", "date_of_birth", "referral_code"):
+            self.assertNotIn(private, sender_profile)

@@ -14,6 +14,7 @@ class ReportTargetTypeChoices(models.TextChoices):
     STORY = "STORY", "Story"
     BLOG = "BLOG", "Blog"
     MEETING = "MEETING", "Meeting"
+    MESSAGE = "MESSAGE", "Chat message"
 
 
 class Report(models.Model):
