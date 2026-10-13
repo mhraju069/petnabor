@@ -312,6 +312,37 @@ class BulkDeleteMessagesView(views.APIView):
         return Response({"success": True, "deleted_count": count})
 
 
+class ThreadMuteView(views.APIView):
+    """
+    POST   /messaging/threads/<thread_id>/mute/ — mute notifications for me
+    DELETE /messaging/threads/<thread_id>/mute/ — unmute
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=None,
+        responses={200: inline_serializer(
+            name="ThreadMuteResponse",
+            fields={"is_muted": serializers.BooleanField()},
+        )},
+    )
+    def post(self, request, thread_id):
+        services.set_thread_muted(request.user, thread_id, True)
+        return Response({"is_muted": True})
+
+    @extend_schema(
+        request=None,
+        responses={200: inline_serializer(
+            name="ThreadUnmuteResponse",
+            fields={"is_muted": serializers.BooleanField()},
+        )},
+    )
+    def delete(self, request, thread_id):
+        services.set_thread_muted(request.user, thread_id, False)
+        return Response({"is_muted": False})
+
+
 class ClearThreadHistoryView(views.APIView):
     """POST /messaging/threads/<thread_id>/clear-history/ — per-user clear history."""
 

@@ -153,7 +153,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         .filter(left_at__isnull=True)           # active only
                         .select_related("user__profile")
                         .only(
-                            "id", "thread_id", "user_id", "left_at", "cleared_history_at",
+                            "id", "thread_id", "user_id", "left_at", "cleared_history_at", "is_muted",
                             "user__id", "user__username",
                             "user__first_name", "user__last_name",
                             "user__last_active",
@@ -223,6 +223,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
             other_user = None
             my_cleared_at = None
+            my_muted = any(p.user_id == me_id and p.is_muted for p in parts)
             if thread.thread_type == "DIRECT":
                 for p in parts:
                     if p.user_id != me_id:
@@ -259,6 +260,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     if last_timestamp else None
                 ),
                 "is_read":                 unread_map.get(str(thread.id), 0) == 0,
+                "unread_count":            unread_map.get(str(thread.id), 0),
+                "is_muted":                my_muted,
                 "created_at":              thread.created_at.isoformat(),
             })
 

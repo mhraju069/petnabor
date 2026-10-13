@@ -221,6 +221,8 @@ class ChatThreadSerializer(serializers.ModelSerializer):
     unread_count = serializers.SerializerMethodField()
     last_message_text = serializers.SerializerMethodField()
     last_message_timestamp = serializers.SerializerMethodField()
+    # Whether the requesting user muted this thread (no push notifications).
+    is_muted = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatThread
@@ -235,6 +237,7 @@ class ChatThreadSerializer(serializers.ModelSerializer):
             "last_message_timestamp",
             "is_read",
             "unread_count",
+            "is_muted",
             "created_at",
         ]
 
@@ -275,6 +278,10 @@ class ChatThreadSerializer(serializers.ModelSerializer):
             if p.user_id == me_id:
                 return p
         return None
+
+    def get_is_muted(self, thread) -> bool:
+        my_p = self._get_my_participant(thread)
+        return bool(my_p and my_p.is_muted)
 
     def get_last_message_text(self, thread):
         my_p = self._get_my_participant(thread)

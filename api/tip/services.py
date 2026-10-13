@@ -466,13 +466,15 @@ def handle_payment_intent_succeeded(payment_intent):
             try:
                 send_notification(
                     title="You have a tip waiting!",
+                    # The recipient's share (after the platform fee), as in
+                    # every other recipient notification.
                     body=(
-                        f"{tipper_name} sent you a ${tip.amount:.2f} tip. "
+                        f"{tipper_name} sent you a ${tip.recipient_amount:.2f} tip. "
                         "Connect your bank account to receive it."
                     ),
                     user_id=tip.recipient_id,
                     notification_type=NotificationTypes.TIP_ENABLE_REQUEST,
-                    data={"action": "connect_stripe", "tip_id": str(tip.id), "amount": str(tip.amount)},
+                    data={"action": "connect_stripe", "tip_id": str(tip.id), "amount": str(tip.recipient_amount)},
                 )
             except Exception as exc:
                 logger.warning("Notification failed for held tip %s (recipient): %s", tip.id, exc)

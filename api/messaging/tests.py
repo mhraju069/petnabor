@@ -665,3 +665,63 @@ class PhotoMessageTest(MessagingBaseTestCase):
         self.assertTrue(message.is_deleted_for_everyone)
         self.assertFalse(message.media_file)
         self.assertIsNone(message.media_url)
+
+
+# ──────────────────────────────────────────────
+# Mute / unmute
+# ──────────────────────────────────────────────
+
+
+class ThreadMuteTest(MessagingBaseTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.make_friends(self.alice, self.bob)
+        from .services import get_or_create_direct_thread
+
+        self.thread, _ = get_or_create_direct_thread(self.alice, self.bob)
+        self.mute_url = reverse("thread-mute", kwargs={"thread_id": self.thread.id})
+        self.detail_url = reverse("thread-detail", kwargs={"thread_id": self.thread.id})
+        self.messages_url = reverse("message-list-create", kwargs={"thread_id": self.thread.id})
+
+    def test_mute_and_unmute(self):
+        self.client.force_authenticate(self.bob)
+
+        response = self.client.post(self.mute_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["is_muted"])
+        self.assertTrue(self.client.get(self.detail_url).data["is_muted"])
+
+        response = self.client.delete(self.mute_url)
+        self.assertFalse(response.data["is_muted"])
+        self.assertFalse(self.client.get(self.detail_url).data["is_muted"])
+
+    def test_mute_is_per_user(self):
+        self.client.force_authenticate(self.bob)
+        self.client.post(self.mute_url)
+        self.client.force_authenticate(self.alice)
+        self.assertFalse(self.client.get(self.detail_url).data["is_muted"])
+
+    @patch("api.messaging.tasks.notify_new_message")
+    def test_muted_user_gets_no_push(self, notify):
+        self.client.force_authenticate(self.bob)
+        self.client.post(self.mute_url)
+
+        self.client.force_authenticate(self.alice)
+        response = self.client.post(self.messages_url, {"text_content": "hi"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        # The message is still delivered, but no push is queued for Bob.
+        self.assertEqual(Message.objects.filter(thread=self.thread).count(), 1)
+        notify.delay.assert_not_called()
+
+    @patch("api.messaging.tasks.notify_new_message")
+    def test_unmuted_user_gets_push(self, notify):
+        self.client.force_authenticate(self.alice)
+        self.client.post(self.messages_url, {"text_content": "hi"}, format="json")
+        notify.delay.assert_called_once()
+        self.assertIn(str(self.bob.id), notify.delay.call_args.args[3])
+
+    def test_non_participant_cannot_mute(self):
+        self.client.force_authenticate(self.carol)
+        response = self.client.post(self.mute_url)
+        self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))

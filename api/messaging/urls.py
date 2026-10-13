@@ -17,6 +17,7 @@ from django.urls import path
 from .views import (
     BulkDeleteMessagesView,
     ClearThreadHistoryView,
+    ThreadMuteView,
     GroupThreadCreateView,
     MessageDetailView,
     MessageListCreateView,
@@ -40,6 +41,11 @@ urlpatterns = [
         "threads/<uuid:thread_id>/",
         ThreadDetailView.as_view(),
         name="thread-detail",
+    ),
+    path(
+        "threads/<uuid:thread_id>/mute/",
+        ThreadMuteView.as_view(),
+        name="thread-mute",
     ),
     path(
         "threads/<uuid:thread_id>/clear-history/",

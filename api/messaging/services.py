@@ -367,18 +367,20 @@ def send_message(
     # Async push notification (FCM)
     try:
         from .tasks import notify_new_message
+        # Muted participants still get the message, just no push.
         recipient_ids = list(
-            ThreadParticipant.objects.filter(thread=thread, left_at__isnull=True)
+            ThreadParticipant.objects.filter(thread=thread, left_at__isnull=True, is_muted=False)
             .exclude(user=sender)
             .values_list("user_id", flat=True)
         )
-        notify_new_message.delay(
-            str(message.id),
-            str(thread.id),
-            str(sender.id),
-            [str(uid) for uid in recipient_ids],
-            preview[:100],
-        )
+        if recipient_ids:
+            notify_new_message.delay(
+                str(message.id),
+                str(thread.id),
+                str(sender.id),
+                [str(uid) for uid in recipient_ids],
+                preview[:100],
+            )
     except Exception:
         logger.exception("Failed to queue messaging push notification")
 
@@ -529,6 +531,19 @@ def leave_thread(user, thread_id):
     membership.save(update_fields=["left_at", "cleared_history_at"])
     invalidate_inbox_cache(user.id)
     return True
+
+
+def set_thread_muted(user, thread_id, muted: bool):
+    """
+    Mute or unmute a thread for this user only. Muted threads still receive
+    messages (and unread counts) but send this user no push notifications.
+    """
+    _, membership = get_thread_for_participant(user, thread_id)
+    if membership.is_muted != muted:
+        membership.is_muted = muted
+        membership.save(update_fields=["is_muted"])
+        invalidate_inbox_cache(user.id)
+    return membership
 
 
 def clear_thread_history(user, thread_id):
