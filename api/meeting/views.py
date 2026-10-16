@@ -50,6 +50,7 @@ class MeetingViewSet(viewsets.ModelViewSet):
                 body="sent you a meetup invitation.",
                 user_id=receiver.id,
                 notification_type=NotificationTypes.MEETUP_INVITE,
+                actor=sender,
                 data={"meeting_id": str(serializer.instance.id)},
             )
         except Exception:
@@ -155,6 +156,7 @@ class MeetingViewSet(viewsets.ModelViewSet):
                 body="accepted your meeting request.",
                 user_id=meeting.sender.id,
                 notification_type=NotificationTypes.MEETUP_UPDATE,
+                actor=request.user,
                 data={"meeting_id": str(meeting.id)},
             )
         except Exception:
@@ -187,6 +189,7 @@ class MeetingViewSet(viewsets.ModelViewSet):
                 body="cancelled the meetup.",
                 user_id=notify_user.id,
                 notification_type=NotificationTypes.MEETUP_UPDATE,
+                actor=request.user,
                 data={"meeting_id": str(meeting.id)},
             )
         except Exception:
@@ -264,6 +267,7 @@ class MeetingFeedbackViewSet(viewsets.ModelViewSet):
                 body="left you a meeting review.",
                 user_id=reviewee.id,
                 notification_type=NotificationTypes.SYSTEM,
+                actor=reviewer,
                 data={"meeting_id": str(meeting.id)},
             )
         except Exception:

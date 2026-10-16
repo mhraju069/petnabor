@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name="fcmdevice",
-            name="custom_chat_notifications",
+            name="custom_notifications",
             field=models.BooleanField(default=False),
         ),
     ]

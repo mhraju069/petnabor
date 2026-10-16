@@ -71,6 +71,7 @@ def send_friend_request(sender, receiver_id):
             title=sender_display,
             body="accepted your friend request.",
             notification_type=NotificationTypes.FRIEND_ACCEPT,
+            actor=sender,
             data={"accepter_id": str(sender.id)},
         )
         reverse_req.delete()
@@ -85,6 +86,7 @@ def send_friend_request(sender, receiver_id):
         title=sender_display,
         body="sent you a friend request.",
         notification_type=NotificationTypes.FRIEND_REQUEST,
+        actor=sender,
         data={"sender_id": str(sender.id), "request_id": str(freq.id)},
     )
     return freq, False
@@ -119,6 +121,7 @@ def accept_friend_request(user, friend_request):
         title=accepter_display,
         body="accepted your friend request.",
         notification_type=NotificationTypes.FRIEND_ACCEPT,
+        actor=user,
         data={"accepter_id": str(user.id)},
     )
     return True

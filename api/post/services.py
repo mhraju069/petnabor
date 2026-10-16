@@ -345,6 +345,7 @@ class LikeService:
                         body="reacted to your post.",
                         user_id=post.author_id,
                         notification_type=NotificationTypes.POST_LIKE,
+                        actor=user,
                         data={"post_id": str(post.id)},
                     )
                 except Exception:
@@ -416,6 +417,7 @@ class CommentService:
                     body=body_msg,
                     user_id=recipient_id,
                     notification_type=NotificationTypes.POST_COMMENT,
+                    actor=user,
                     data={"post_id": str(comment.post_id), "comment_id": str(comment.id)},
                 )
         except Exception:

@@ -89,6 +89,7 @@ def award_referral_points(new_user):
             body=f"joined using your referral link! You've earned {cfg.referrer_points} points.",
             user_id=referrer.id,
             notification_type=NotificationTypes.REWARD,
+            actor=new_user,
             data={
                 "type": "referral_redeemed",
                 "sender_name": sender_first_name,

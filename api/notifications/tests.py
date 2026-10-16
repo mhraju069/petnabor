@@ -254,8 +254,8 @@ class FCMTokenHandlingTests(TestCase):
 
 class ChatPushStyleTests(TestCase):
     """
-    App versions that draw their own chat notifications get chat pushes as
-    data-only messages; older versions keep normal system notifications.
+    App versions that draw their own notifications get data-only pushes;
+    older versions keep normal system notifications.
     """
 
     def setUp(self):
@@ -265,7 +265,7 @@ class ChatPushStyleTests(TestCase):
         NotificationSettings.objects.filter(user=self.user).update(push_notifications=True)
         FCMDevice.objects.create(user=self.user, registration_id="old_app")
         FCMDevice.objects.create(
-            user=self.user, registration_id="new_app", custom_chat_notifications=True
+            user=self.user, registration_id="new_app", custom_notifications=True
         )
 
     def _send(self, notification_type):
@@ -305,9 +305,32 @@ class ChatPushStyleTests(TestCase):
         # iOS groups a chat's notifications together.
         self.assertEqual(plain.apns.payload.aps.thread_id, "t1")
 
-    def test_other_types_stay_normal_notifications(self):
-        sent = self._send(NotificationTypes.SYSTEM)
-        self.assertEqual(len(sent), 1)
-        (message,) = sent.values()
-        self.assertEqual(sorted(message.tokens), ["new_app", "old_app"])
-        self.assertIsNotNone(message.notification)
+    def test_other_types_follow_the_device_too(self):
+        sent = self._send(NotificationTypes.POST_LIKE)
+        self.assertIsNone(sent[("new_app",)].notification)
+        self.assertIsNotNone(sent[("old_app",)].notification)
+        # Only chats are grouped per conversation on iOS.
+        self.assertIsNone(sent[("old_app",)].apns.payload.aps.thread_id)
+
+    @patch("api.notifications.services._process_notification_batch.delay")
+    def test_actor_photo_and_name_are_added(self, mock_delay):
+        from api.users.models import Profile
+
+        actor = _make_user("liker", "liker@test.com")
+        actor.first_name, actor.last_name = "Lily", "Paws"
+        actor.save()
+        profile, _ = Profile.objects.get_or_create(user=actor)
+        with patch("api.notifications.services.avatar_url", return_value="https://cdn/x.jpg"):
+            send_notification(
+                title="Lily Paws",
+                body="reacted to your post.",
+                user_id=self.user.id,
+                notification_type=NotificationTypes.POST_LIKE,
+                data={"post_id": "p1"},
+                actor=actor,
+            )
+        data = mock_delay.call_args.args[3]
+        self.assertEqual(data["post_id"], "p1")
+        self.assertEqual(data["actor_id"], str(actor.id))
+        self.assertEqual(data["actor_name"], "Lily Paws")
+        self.assertEqual(data["actor_avatar"], "https://cdn/x.jpg")

@@ -364,6 +364,7 @@ def transfer_held_tip(tip, connect):
             ),
             user_id=tip.recipient_id,
             notification_type=NotificationTypes.TIP_RECEIVED,
+            actor=tip.tipper,
             data={"tip_id": str(tip.id), "amount": str(tip.recipient_amount)},
         )
     except Exception as exc:
@@ -377,6 +378,7 @@ def transfer_held_tip(tip, connect):
             ),
             user_id=tip.tipper_id,
             notification_type=NotificationTypes.TIP_SENT,
+            actor=tip.recipient,
             data={"tip_id": str(tip.id), "status": "released"},
         )
     except Exception as exc:
@@ -474,6 +476,7 @@ def handle_payment_intent_succeeded(payment_intent):
                     ),
                     user_id=tip.recipient_id,
                     notification_type=NotificationTypes.TIP_ENABLE_REQUEST,
+                    actor=tip.tipper,
                     data={"action": "connect_stripe", "tip_id": str(tip.id), "amount": str(tip.recipient_amount)},
                 )
             except Exception as exc:
@@ -489,6 +492,7 @@ def handle_payment_intent_succeeded(payment_intent):
                     ),
                     user_id=tip.tipper_id,
                     notification_type=NotificationTypes.TIP_SENT,
+                    actor=tip.recipient,
                     data={"tip_id": str(tip.id), "status": "held"},
                 )
             except Exception as exc:
@@ -528,6 +532,7 @@ def handle_payment_intent_succeeded(payment_intent):
             body=f"{tipper_name} sent you a ${tip.recipient_amount:.2f} tip. It's now in your account!",
             user_id=tip.recipient_id,
             notification_type=NotificationTypes.TIP_RECEIVED,
+            actor=tip.tipper,
             data={"tip_id": str(tip.id), "amount": str(tip.recipient_amount)},
         )
     except Exception as exc:
@@ -538,6 +543,7 @@ def handle_payment_intent_succeeded(payment_intent):
             body=f"Your ${tip.amount:.2f} tip to {recipient_name} was delivered successfully.",
             user_id=tip.tipper_id,
             notification_type=NotificationTypes.TIP_SENT,
+            actor=tip.recipient,
             data={"tip_id": str(tip.id), "status": "succeeded"},
         )
     except Exception as exc:

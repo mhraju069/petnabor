@@ -42,6 +42,7 @@ class BlogService:
                         body=f"liked your blog '{blog.title}'.",
                         user_id=blog.author.id,
                         notification_type=NotificationTypes.LIKE,
+                        actor=user,
                         data={"blog_slug": blog.slug}
                     )
                 
@@ -113,6 +114,7 @@ class BlogService:
                     body=f"replied to your comment on '{blog.title}'.",
                     user_id=parent_comment.user.id,
                     notification_type=NotificationTypes.COMMENT,
+                    actor=user,
                     data={"blog_slug": blog.slug}
                 )
             elif blog.author != user:
@@ -122,6 +124,7 @@ class BlogService:
                     body=f"commented on your blog '{blog.title}'.",
                     user_id=blog.author.id,
                     notification_type=NotificationTypes.COMMENT,
+                    actor=user,
                     data={"blog_slug": blog.slug}
                 )
             

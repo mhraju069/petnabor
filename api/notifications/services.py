@@ -42,6 +42,35 @@ NOTIFICATION_SETTINGS_MAP = {
 DEFAULT_BATCH_SIZE = 500
 
 
+def avatar_url(user) -> str:
+    """Absolute URL of a user's profile picture, or "" (no local paths)."""
+    profile = getattr(user, "profile", None)
+    picture = getattr(profile, "profile_picture", None)
+    if not picture:
+        return ""
+    try:
+        url = picture.url
+    except Exception:
+        return ""
+    return url if url.startswith("http") else ""
+
+
+def actor_data(actor) -> dict:
+    """
+    Who caused a notification (liked, commented, sent a request…), so the
+    app can show their photo: on the phone's notification and in the
+    in-app list.
+    """
+    if actor is None:
+        return {}
+    name = f"{actor.first_name or ''} {actor.last_name or ''}".strip() or actor.username or "Someone"
+    return {
+        "actor_id": str(actor.id),
+        "actor_name": name,
+        "actor_avatar": avatar_url(actor),
+    }
+
+
 def send_notification(
     title,
     body,
@@ -52,11 +81,18 @@ def send_notification(
     notification_type=NotificationTypes.INFO,
     filters=None,
     save_to_db=True,
+    actor=None,
 ):
     """
     Unified entrypoint for triggering notifications.
     Handles single user, multi-user, and broadcast efficiently while pushing heavy work to Celery.
+
+    actor: the user who caused it (optional); adds their id, name and photo
+    to the data.
     """
+    if actor is not None:
+        data = {**actor_data(actor), **(data or {})}
+
     users_query = User.objects.all()
 
     if broadcast:
@@ -110,8 +146,8 @@ def send_notification(
 def _build_multicast(tokens, title, body, payload_data, notification_type, data_only):
     """
     data_only=True: no notification block, so Android hands the push to the
-    app, which shows it itself (conversation style). Title and body travel
-    in the data instead.
+    app, which shows it itself (with the actor's photo; chats in
+    conversation style). Title and body travel in the data instead.
     """
     is_message = notification_type == NotificationTypes.MESSAGE
     # iOS stacks notifications that share a thread-id (one group per chat).
@@ -228,17 +264,14 @@ def _process_notification_batch(
         if data:
             payload_data.update({k: str(v) for k, v in data.items()})
 
-        # Chat messages go as data-only pushes to app versions that draw
-        # their own conversation-style notification (sender photo, messages
-        # stacked per chat). Everything else, and older app versions, get a
-        # normal system notification.
-        rich_tokens = set()
-        if notification_type == NotificationTypes.MESSAGE:
-            rich_tokens = set(
-                FCMDevice.objects.filter(
-                    registration_id__in=tokens, custom_chat_notifications=True
-                ).values_list("registration_id", flat=True)
-            )
+        # App versions that draw their own notifications (the other
+        # person's photo; chats stacked per conversation) get data-only
+        # pushes. Older app versions keep normal system notifications.
+        rich_tokens = set(
+            FCMDevice.objects.filter(
+                registration_id__in=tokens, custom_notifications=True
+            ).values_list("registration_id", flat=True)
+        )
         plain = [t for t in tokens if t not in rich_tokens]
         rich = [t for t in tokens if t in rich_tokens]
         groups = [(group, data_only) for group, data_only in ((plain, False), (rich, True)) if group]

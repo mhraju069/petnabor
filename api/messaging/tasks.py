@@ -11,7 +11,7 @@ from celery import shared_task
 from django.contrib.auth import get_user_model
 
 from api.notifications.models import NotificationTypes
-from api.notifications.services import send_notification
+from api.notifications.services import avatar_url, send_notification
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -39,17 +39,6 @@ def notify_new_message(self, message_id, thread_id, sender_id, recipient_ids, te
         title = sender_display
         body = f"{text_preview}"
 
-        # Shown in the app's conversation-style notification (Android).
-        avatar = ""
-        profile = getattr(sender, "profile", None)
-        picture = getattr(profile, "profile_picture", None)
-        if picture:
-            try:
-                url = picture.url
-                avatar = url if url.startswith("http") else ""
-            except Exception:
-                avatar = ""
-
         from .models import ChatThread, ThreadTypes
 
         thread = ChatThread.objects.filter(id=thread_id).only("thread_type", "name").first()
@@ -61,6 +50,7 @@ def notify_new_message(self, message_id, thread_id, sender_id, recipient_ids, te
             body=body,
             notification_type=NotificationTypes.MESSAGE,
             save_to_db=False,  # Message notifications are transient — FCM only, no DB record
+            actor=sender,
             data={
                 "message_id": message_id,
                 "thread_id": thread_id,
@@ -68,7 +58,7 @@ def notify_new_message(self, message_id, thread_id, sender_id, recipient_ids, te
                 "message": text_preview,
                 "type": "new_message",
                 "sender_name": sender_display,
-                "sender_avatar": avatar,
+                "sender_avatar": avatar_url(sender),
                 "is_group": "1" if is_group else "",
                 "thread_name": (thread.name or "") if is_group else "",
             },
