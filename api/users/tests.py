@@ -651,3 +651,130 @@ class FirebaseLoginTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access_token", response.data["data"])
 
+
+
+class SocialAndPasswordAccountTests(APITestCase):
+    """Email/password accounts meeting Google/Apple sign-in, and vice versa."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.firebase_url = reverse("firebase-login")
+        self.login_url = reverse("login")
+        self.reset_url = reverse("password-reset-request")
+
+    def _google(self, email, uid="g-uid-1", verified=True):
+        return {
+            "uid": uid,
+            "email": email,
+            "email_verified": verified,
+            "firebase": {"sign_in_provider": "google.com"},
+        }
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_google_links_to_verified_password_account(self, mock_verify):
+        user = User.objects.create_user(
+            email="sam@example.com", username="sam", password="Secret123!",
+            is_verified=True, is_email_verified=True,
+        )
+        mock_verify.return_value = self._google("Sam@Example.com")  # case differs
+
+        response = self.client.post(self.firebase_url, {"id_token": "t"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.firebase_uid, "g-uid-1")
+        self.assertTrue(user.check_password("Secret123!"))  # password login still works
+        self.assertEqual(User.objects.filter(email__iexact="sam@example.com").count(), 1)
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_unverified_provider_email_does_not_link(self, mock_verify):
+        user = User.objects.create_user(
+            email="sam@example.com", username="sam", password="Secret123!",
+            is_verified=True, is_email_verified=True,
+        )
+        mock_verify.return_value = self._google("sam@example.com", verified=False)
+
+        response = self.client.post(self.firebase_url, {"id_token": "t"})
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        user.refresh_from_db()
+        self.assertIsNone(user.firebase_uid)
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_pre_hijacked_unverified_signup_loses_its_password(self, mock_verify):
+        """Someone registered the owner's email but never verified it."""
+        squatter = User.objects.create_user(
+            email="owner@example.com", username="squatter", password="Attacker1!",
+            is_verified=False, is_email_verified=False,
+        )
+        mock_verify.return_value = self._google("owner@example.com")
+
+        response = self.client.post(self.firebase_url, {"id_token": "t"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        squatter.refresh_from_db()
+        self.assertFalse(squatter.has_usable_password())
+        self.assertTrue(squatter.is_email_verified)
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_phone_verified_account_with_unconfirmed_email_is_not_taken_over(self, mock_verify):
+        phone_user = User.objects.create_user(
+            email="maybe@example.com", phone="+15550001111", username="phoneuser",
+            password="Secret123!", is_verified=True, is_phone_verified=True,
+            is_email_verified=False,
+        )
+        mock_verify.return_value = self._google("maybe@example.com")
+
+        response = self.client.post(self.firebase_url, {"id_token": "t"})
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        phone_user.refresh_from_db()
+        self.assertIsNone(phone_user.firebase_uid)
+        self.assertTrue(phone_user.check_password("Secret123!"))
+
+    @patch("api.users.services.firebase_auth.verify_id_token")
+    def test_suspended_account_cannot_use_social_login(self, mock_verify):
+        User.objects.create_user(
+            email="banned@example.com", username="banned", password="Secret123!",
+            is_verified=True, is_email_verified=True, is_active=False,
+        )
+        mock_verify.return_value = self._google("banned@example.com")
+
+        response = self.client.post(self.firebase_url, {"id_token": "t"})
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("deactivated", str(response.data))
+
+    def _social_only_user(self):
+        user = User.objects.create_user(
+            email="social@example.com", username="social", password=None,
+            firebase_uid="apple-1", is_verified=True, is_email_verified=True,
+        )
+        self.assertFalse(user.has_usable_password())
+        return user
+
+    def test_password_login_on_social_account_explains(self):
+        self._social_only_user()
+        response = self.client.post(
+            self.login_url, {"email_or_phone": "social@example.com", "password": "whatever1"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Google or Apple", str(response.data))
+
+    @patch("api.users.services._send_password_reset_email")
+    def test_password_reset_on_social_account_is_refused(self, send_email):
+        self._social_only_user()
+        response = self.client.post(self.reset_url, {"email_or_phone": "social@example.com"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Google or Apple", str(response.data))
+        send_email.assert_not_called()
+
+    @patch("api.users.services._send_password_reset_email")
+    def test_password_reset_still_works_for_password_accounts(self, send_email):
+        User.objects.create_user(
+            email="pw@example.com", username="pw", password="Secret123!",
+            is_verified=True, is_email_verified=True,
+        )
+        response = self.client.post(self.reset_url, {"email_or_phone": "pw@example.com"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        send_email.assert_called_once()

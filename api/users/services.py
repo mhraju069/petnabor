@@ -30,6 +30,7 @@ from .exceptions import (
     InvalidOTP,
     OTPExpired,
     OTPMaxAttemptsExceeded,
+    SocialAccountOnly,
 )
 from .models import OTPTypes, OTPVerification, Profile
 
@@ -297,6 +298,10 @@ def login_user(email_or_phone, password):
     if not user:
         raise AuthenticationFailed()
 
+    # Signed up with Google/Apple and never set a password.
+    if not user.has_usable_password() and user.firebase_uid:
+        raise SocialAccountOnly()
+
     if not user.check_password(password):
         raise AuthenticationFailed()
 
@@ -344,6 +349,14 @@ def request_password_reset(email_or_phone):
     if not user:
         raise AuthenticationFailed(
             detail="No account found with this email or phone number."
+        )
+
+    # Google/Apple accounts have no password to reset — point them to the
+    # social button instead of silently adding a password login.
+    if not user.has_usable_password() and user.firebase_uid:
+        raise SocialAccountOnly(
+            detail="This account signs in with Google or Apple, so there's no password "
+            "to reset. Please continue with Google or Apple."
         )
 
     otp_code = create_otp_for_user(user, OTPTypes.PASSWORD_RESET)
@@ -456,21 +469,55 @@ def firebase_login_service(
         first_name = name_parts[0]
         last_name = name_parts[1] if len(name_parts) > 1 else ""
 
+    # Google/Apple confirm the address; other providers may not.
+    email_verified = bool(decoded_token.get("email_verified"))
+    if email:
+        email = email.strip().lower()
+
     # Look up user by firebase_uid first, then by email/phone
     user = User.objects.select_related("profile").filter(firebase_uid=uid).first()
+    linking = False
 
     if not user:
         if email:
-            user = User.objects.select_related("profile").filter(email=email).first()
+            user = User.objects.select_related("profile").filter(email__iexact=email).first()
         elif phone:
             user = User.objects.select_related("profile").filter(phone=phone).first()
+        linking = user is not None
+
+    if user and not user.is_active:
+        raise AuthenticationFailed(
+            detail="This account has been deactivated. Please contact support."
+        )
+
+    if user and linking:
+        # Joining a social login to an existing (email/password) account is
+        # only safe when the provider proved ownership of that email.
+        if email and not email_verified:
+            raise AuthenticationFailed(
+                detail="An account with this email already exists. Please log in with "
+                "your email and password."
+            )
+        # Pre-hijacking guard: if the existing account never verified its email,
+        # whoever registered it may not own the address — drop their password so
+        # only the real owner (who just proved it via Google/Apple) gets in.
+        update_fields = ["firebase_uid", "is_verified"]
+        if email and not user.is_email_verified:
+            if user.is_verified:
+                # A real account verified another way (phone) whose email was
+                # never confirmed: the Google/Apple user may not be its owner.
+                raise AuthenticationFailed(
+                    detail="An account with this email already exists. Please log in "
+                    "with your phone number and password."
+                )
+            user.set_unusable_password()
+            user.is_email_verified = True
+            update_fields += ["password", "is_email_verified"]
+        user.firebase_uid = uid
+        user.is_verified = True
+        user.save(update_fields=update_fields)
 
     if user:
-        # Link Firebase UID if not already linked
-        if not user.firebase_uid:
-            user.firebase_uid = uid
-            user.is_verified = True
-            user.save(update_fields=["firebase_uid", "is_verified"])
         is_new_user = False
     else:
         # Create new user (Firebase users are auto-verified)
@@ -494,7 +541,7 @@ def firebase_login_service(
             ai_data_consent=ai_data_consent,
             firebase_uid=uid,
             is_verified=True,
-            is_email_verified=bool(email),
+            is_email_verified=bool(email) and email_verified,
             is_phone_verified=bool(phone),
         )
         is_new_user = True

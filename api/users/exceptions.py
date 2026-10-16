@@ -16,6 +16,17 @@ class AuthenticationFailed(APIException):
     default_code = "authentication_failed"
 
 
+class SocialAccountOnly(APIException):
+    """Password login / reset on an account created with Google or Apple sign-in."""
+
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_detail = (
+        "This account was created with Google or Apple sign-in. "
+        "Please continue with Google or Apple."
+    )
+    default_code = "social_account_only"
+
+
 class AccountNotVerified(APIException):
     """Raised when an unverified user attempts to login or access protected resources."""
 
