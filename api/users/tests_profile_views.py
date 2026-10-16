@@ -52,11 +52,14 @@ class ProfileUpdateViewTests(TestCase):
         
         # Test updating the profile picture
         url = reverse("profile-detail")
-        response = self.client.patch(
-            url, 
-            {"profile_picture": initial_pic},
-            format="multipart"
-        )
+        # TestCase wraps each test in a transaction that never commits, so
+        # on_commit callbacks only run when captured explicitly.
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                url,
+                {"profile_picture": initial_pic},
+                format="multipart"
+            )
         
         # Expect successful update
         self.assertEqual(response.status_code, 200)
@@ -65,9 +68,6 @@ class ProfileUpdateViewTests(TestCase):
         self.user.profile.refresh_from_db()
         self.assertTrue(self.user.profile.profile_picture.name.endswith(".jpg"))
         
-        # Because we wrapped the `.delay` hook in transaction.on_commit in the view,
-        # TestCase runner will automatically fire it since Django's test client correctly 
-        # executes on_commit hooks after the view finishes processing the transaction wrapper.
         mock_delay.assert_called_once_with(str(self.user.profile.id), "profile_picture")
         
         # Now let's try updating both cover_photo and profile_picture at the same time
@@ -75,11 +75,12 @@ class ProfileUpdateViewTests(TestCase):
         new_pic = make_test_image(name="new_pic.jpg")
         new_cover = make_test_image(name="new_cover.jpg")
         
-        response = self.client.patch(
-            url, 
-            {"profile_picture": new_pic, "cover_photo": new_cover},
-            format="multipart"
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                url,
+                {"profile_picture": new_pic, "cover_photo": new_cover},
+                format="multipart"
+            )
         
         self.assertEqual(response.status_code, 200)
         # Should be called twice (once for profile_picture, once for cover_photo)

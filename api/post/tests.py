@@ -11,6 +11,17 @@ from .models import Post, PostComment, PostMedia, PrivacyChoices
 User = get_user_model()
 
 
+def make_test_image(name="test.jpg"):
+    """A real (tiny) JPEG; storage backends may reject non-image bytes."""
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (32, 32), color=(200, 120, 40)).save(buffer, format="JPEG")
+    return SimpleUploadedFile(name, buffer.getvalue(), content_type="image/jpeg")
+
+
 class PostBaseTestCase(TestCase):
     """Base setup for post tests."""
 
@@ -51,7 +62,7 @@ class PostAPITest(PostBaseTestCase):
     def test_create_post_with_media(self):
         self.client.force_authenticate(self.alice)
         url = reverse('post-list')
-        image = SimpleUploadedFile("test.jpg", b"file_content", content_type="image/jpeg")
+        image = make_test_image()
         data = {
             "content_text": "Post with media",
             "media": [image]
@@ -62,18 +73,20 @@ class PostAPITest(PostBaseTestCase):
         self.assertEqual(PostMedia.objects.count(), 1)
 
     def test_feed_visibility_friends_only(self):
-        # Alice creates a public post
+        # The feed is a public discovery feed: everyone sees PUBLIC posts,
+        # FRIENDS_ONLY posts only reach friends.
         Post.objects.create(author=self.alice, content_text="Public", privacy=PrivacyChoices.PUBLIC)
-        
-        # Bob (stranger) does NOT see it in Feed (Feed is for friends)
+        Post.objects.create(author=self.alice, content_text="Friends", privacy=PrivacyChoices.FRIENDS_ONLY)
+
+        # Bob (stranger) sees only the public post
         self.client.force_authenticate(self.bob)
         response = self.client.get(reverse('post-feed'))
-        self.assertEqual(len(response.data['results']), 0)
+        self.assertEqual([p['content_text'] for p in response.data['results']], ["Public"])
 
-        # Make them friends -> now he sees it
+        # Make them friends -> now he sees both
         self.make_friends(self.alice, self.bob)
         response = self.client.get(reverse('post-feed'))
-        self.assertEqual(len(response.data['results']), 1)
+        self.assertEqual(len(response.data['results']), 2)
 
     def test_guest_can_see_public_post_via_list(self):
         # Alice creates a public post
@@ -242,19 +255,20 @@ class InteractionAPITest(PostBaseTestCase):
         super().setUp()
         self.post = Post.objects.create(author=self.alice, content_text="Interaction Test")
 
-    def test_toggle_like_restricted_to_author(self):
-        # Bob tries to like Alice's post
-        self.client.force_authenticate(self.bob)
+    def test_any_user_can_like(self):
+        # Any signed-in user who can see the post may like it, not just the author.
         url = reverse('post-like', kwargs={'pk': self.post.id})
-        
-        # Like Attempt (Should fail with 403 per IsAuthorOrReadOnly)
+
+        self.client.force_authenticate(self.bob)
         response = self.client.post(url)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        
-        # Alice (Author) can like/react
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
         self.client.force_authenticate(self.alice)
         response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.likes_count, 2)
 
     def test_create_comment_and_reply(self):
         self.client.force_authenticate(self.bob)
@@ -281,15 +295,14 @@ class InteractionAPITest(PostBaseTestCase):
         parent = PostComment.objects.get(id=comment_id)
         self.assertEqual(parent.replies_count, 1)
 
-    def test_toggle_save_restricted_to_author(self):
-        self.client.force_authenticate(self.bob)
+    def test_any_user_can_save(self):
+        # Any signed-in user who can see the post may save it, not just the author.
         url = reverse('post-save-post', kwargs={'pk': self.post.id})
-        
-        # Save Attempt (Should fail with 403)
+
+        self.client.force_authenticate(self.bob)
         response = self.client.post(url)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        
-        # Alice (Author) can save
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
         self.client.force_authenticate(self.alice)
         response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)

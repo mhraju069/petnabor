@@ -62,6 +62,9 @@ class InfrastructureConfigTests(TestCase):
         mock_send_mail.assert_called_once()
 
 
+# Tests run on local storage (settings.TESTING), so Cloudinary isn't
+# configured; give the backend dummy credentials (no network: destroy is mocked).
+@override_settings(CLOUDINARY_STORAGE={"CLOUD_NAME": "test", "API_KEY": "key", "API_SECRET": "secret"})
 class AutoMediaCloudinaryStorageDeleteTests(TestCase):
     """
     Stored names carry the file extension, Cloudinary public_ids for images

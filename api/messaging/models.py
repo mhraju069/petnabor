@@ -218,5 +218,7 @@ class Message(models.Model):
     def __str__(self):
         if self.is_deleted_for_everyone:
             return f"[{self.sender}] <deleted>"
-        preview = (self.text_content or "")[:40] or self.message_type
-        return f"[{self.sender}] {preview}"
+        # No message text here: __str__ shows up in admin page titles,
+        # breadcrumbs, delete confirmations and the admin history log, and
+        # chat content is private (see MessageAdmin).
+        return f"[{self.sender}] {self.get_message_type_display()} message"

@@ -193,8 +193,12 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 # Priority: Cloudinary → AWS S3 → Local filesystem
 # Switch backends by setting USE_CLOUDINARY=True or USE_S3=True in .env.
 
-USE_CLOUDINARY = os.getenv("USE_CLOUDINARY") == "True"
-USE_S3 = os.getenv("USE_S3") == "True"
+# Tests always use the local filesystem: never upload test files to the
+# real Cloudinary/S3 account (and cloud-side checks like "Invalid image
+# file" or CDN caching would make tests flaky).
+TESTING = "test" in sys.argv
+USE_CLOUDINARY = os.getenv("USE_CLOUDINARY") == "True" and not TESTING
+USE_S3 = os.getenv("USE_S3") == "True" and not TESTING
 
 if USE_CLOUDINARY:
     # ── Cloudinary ────────────────────────────────────────────────────────────
@@ -297,7 +301,7 @@ AUTHENTICATION_BACKENDS = [
     "axes.backends.AxesStandaloneBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
-AXES_ENABLED = "test" not in sys.argv  # test clients log in without a request
+AXES_ENABLED = not TESTING  # test clients log in without a request
 AXES_FAILURE_LIMIT = int(os.getenv("AXES_FAILURE_LIMIT", "5"))
 AXES_COOLOFF_TIME = 1  # hours
 AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]

@@ -179,7 +179,8 @@ class MeetingTimingRulesTest(TestCase):
             'address_street': '1 St', 'city': 'C', 'state': 'S', 'zipcode': '12345',
         })
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('visit_date', response.data)
+        # The API's error format nests field errors under "errors".
+        self.assertIn('visit_date', response.data['errors'])
 
 
 class MeetingParticipantPrivacyTest(TestCase):
@@ -216,6 +217,8 @@ class MeetingParticipantPrivacyTest(TestCase):
             visit_date=date.today() + timedelta(days=2),
             visit_time=time(10, 0),
         )
+        # Fresh from the DB: `alice` still caches the profile the signal created.
+        meeting = Meeting.objects.select_related("sender__profile").get(pk=meeting.pk)
         data = MeetingSerializer(meeting).data
         sender_profile = data["sender"]["profile"]
 

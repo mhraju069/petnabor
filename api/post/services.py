@@ -432,10 +432,14 @@ class CommentService:
 
         comment.delete()
 
-        Post.objects.filter(id=post_id).update(comments_count=F("comments_count") - 1)
+        # Never below zero (counters can drift, e.g. rows created outside the
+        # service); a negative value would violate the DB check constraint.
+        Post.objects.filter(id=post_id, comments_count__gt=0).update(
+            comments_count=F("comments_count") - 1
+        )
 
         if parent_comment_id:
-            PostComment.objects.filter(id=parent_comment_id).update(
+            PostComment.objects.filter(id=parent_comment_id, replies_count__gt=0).update(
                 replies_count=F("replies_count") - 1
             )
 

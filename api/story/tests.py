@@ -63,7 +63,13 @@ class StoryPublishTestCase(StoryBaseTestCase):
     def test_publish_image_story(self):
         self.client.force_authenticate(self.alice)
         url = reverse('story-list')
-        image = SimpleUploadedFile("test.jpg", b"file_content", content_type="image/jpeg")
+        import io
+
+        from PIL import Image as PILImage
+
+        buffer = io.BytesIO()
+        PILImage.new("RGB", (32, 32), color=(40, 120, 200)).save(buffer, format="JPEG")
+        image = SimpleUploadedFile("test.jpg", buffer.getvalue(), content_type="image/jpeg")
         data = {
             "media_type": "IMAGE",
             "media": image,
