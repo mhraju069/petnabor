@@ -5,9 +5,9 @@
     PetNabor Social Command Center | {{ site_title|default:_('Django site admin') }}
 {% endblock %}
 
-{% block header %}
-    {# Kill the default header #}
-{% endblock %}
+{# Keep Unfold's default header: it holds the sidebar toggle. Overriding it
+   with an empty block left no way to open the sidebar on phones/tablets or
+   to bring it back after collapsing it. #}
 
 {% block content %}
 <style>
@@ -196,7 +196,7 @@
               <p class="text-[10px] font-black text-rose-500 uppercase mb-2">{{ report.reason|truncatechars:25 }}</p>
               <div class="flex items-center justify-between gap-2">
                 <span class="text-xs font-bold text-gray-800 dark:text-gray-200 truncate">Issue #{{ report.id|stringformat:"str"|slice:":8" }}</span>
-                <a href="/admin/report/report/{{ report.id }}/change/" class="shrink-0 text-[10px] font-black px-4 py-2 bg-rose-500 text-white rounded-full hover:scale-105 transition-transform">Resolve</a>
+                <a href="/admin/report/report/{{ report.id }}/change/" class="shrink-0 text-[10px] font-black px-4 py-2 bg-rose-500 text-white rounded-full hover:scale-105 transition-transform">Review</a>
               </div>
             </div>
             {% empty %}

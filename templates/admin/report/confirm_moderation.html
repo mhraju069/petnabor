@@ -1,0 +1,35 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="max-w-2xl">
+  <h1 class="font-semibold text-xl mb-4">{{ title }}</h1>
+
+  <div class="border border-red-200 bg-red-50 text-red-700 rounded-md px-4 py-3 mb-6 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400">
+    {{ warning }}
+  </div>
+
+  <div class="border rounded-md p-4 mb-6 dark:border-gray-800">
+    <p class="mb-1"><strong>Report:</strong> {{ report.get_target_type_display }} · {{ report.reason }}</p>
+    {% if summary.exists %}
+      <p class="mb-1"><strong>Status:</strong> {{ summary.status }}</p>
+      {% if summary.owner %}<p class="mb-1"><strong>Posted by:</strong> {{ summary.owner.email|default:summary.owner.username }}</p>{% endif %}
+      <p class="mt-3 whitespace-pre-wrap">{{ summary.text|default:"(no text)"|truncatechars:600 }}</p>
+    {% else %}
+      <p><em>This item no longer exists.</em></p>
+    {% endif %}
+  </div>
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="flex gap-3">
+      <button type="submit" class="bg-red-600 text-white font-semibold px-4 py-2 rounded-md hover:bg-red-700">
+        {% translate "Yes, continue" %}
+      </button>
+      <a href="{{ cancel_url }}" class="border px-4 py-2 rounded-md font-semibold dark:border-gray-700">
+        {% translate "Cancel" %}
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

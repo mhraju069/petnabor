@@ -97,8 +97,9 @@ def dashboard_callback(request, context: dict) -> dict:
         from api.report.models import Report
 
         pending_reports = Report.objects.filter(is_resolved=False).count()
-        recent_reports = Report.objects.order_by("-created_at")[:10]
-        flagged_posts = Report.objects.filter(target_type="post").order_by("-created_at")[:10]
+        # Open reports first: these are the ones needing a moderator.
+        recent_reports = Report.objects.filter(is_resolved=False).order_by("-created_at")[:10]
+        flagged_posts = Report.objects.filter(target_type="POST").order_by("-created_at")[:10]
     except Exception:
         pending_reports = 0
         recent_reports = []
