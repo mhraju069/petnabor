@@ -177,12 +177,37 @@ class PostService:
         )
 
     @staticmethod
+    @transaction.atomic
     def soft_delete_post(post: Post, user: User) -> None:
-        """Soft-deletes a post. Raises PermissionError if user is not the author."""
+        """
+        Soft-deletes a post and permanently removes its media.
+
+        The post row stays (soft delete), but its photos/videos — and any
+        comment attachments — are deleted from storage (Cloudinary): the
+        author asked for the post to be gone, and nothing can show it again.
+        Raises PermissionError if user is not the author.
+        """
         if post.author != user:
             raise PermissionError("You do not have permission to delete this post.")
         post.is_deleted = True
         post.save(update_fields=["is_deleted", "updated_at"])
+        PostService.purge_media(post)
+
+    @staticmethod
+    def purge_media(post: Post) -> None:
+        """
+        Deletes the post's media rows and comment attachments. Files are
+        removed from storage by django-cleanup after the transaction commits
+        (per-instance delete/save so its signals fire; queryset.delete() and
+        update() would skip them).
+        """
+        for media in PostMedia.objects.filter(post=post):
+            media.delete()
+        for comment in PostComment.objects.filter(post=post).exclude(media_file="").exclude(
+            media_file__isnull=True
+        ):
+            comment.media_file = None
+            comment.save(update_fields=["media_file"])
 
 
 # ──────────────────────────────────────────────

@@ -65,6 +65,8 @@ class Command(BaseCommand):
 
         import cloudinary.api
 
+        self._purge_deleted_posts(opts["delete"])
+
         referenced = self._referenced_public_ids()
         self.stdout.write(f"Files referenced in the database: {len(referenced)}")
 
@@ -107,6 +109,24 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.WARNING(f"Dry run: {total_orphans} file(s) would be deleted. Re-run with --delete.")
             )
+
+    def _purge_deleted_posts(self, delete: bool) -> None:
+        """Posts deleted by their authors before media was purged on delete."""
+        from api.post.models import Post, PostMedia
+        from api.post.services import PostService
+
+        manager = getattr(Post, "all_objects", None) or Post._default_manager
+        post_ids = list(
+            PostMedia.objects.filter(post__in=manager.filter(is_deleted=True))
+            .values_list("post_id", flat=True)
+            .distinct()
+        )
+        self.stdout.write(f"Deleted posts that still have media: {len(post_ids)}")
+        if delete:
+            for post in manager.filter(id__in=post_ids):
+                PostService.purge_media(post)  # files go via django-cleanup
+            if post_ids:
+                self.stdout.write(self.style.SUCCESS(f"Removed media of {len(post_ids)} deleted post(s)."))
 
     def _referenced_public_ids(self) -> set:
         ids = set()

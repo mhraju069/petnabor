@@ -61,6 +61,9 @@ class PostAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_deleted",
         "created_at",
     )
+    list_select_related = ("author",)
+    list_per_page = 50
+    show_full_result_count = False
     list_filter = ("privacy", "is_deleted", "is_edited")
     search_fields = ("id", "content_text", "author__email", "author__username")
     ordering = ("-created_at",)
@@ -119,6 +122,7 @@ class PostAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(PostMedia)
 class PostMediaAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ("short_id", "post", "media_type", "display_status", "order", "created_at")
+    list_select_related = ("post", "post__author",)
     search_fields = ("id", "post__id")
     list_filter = ("media_type", "processing_status")
     raw_id_fields = ("post",)
@@ -145,6 +149,9 @@ class PostMediaAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(PostLike)
 class PostLikeAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ("short_id", "post", "user", "reaction_type", "created_at")
+    list_select_related = ("post", "post__author", "user",)
+    list_per_page = 50
+    show_full_result_count = False
     list_filter = ("reaction_type",)
     raw_id_fields = ("post", "user")
     readonly_fields = ("id", "created_at")
@@ -167,6 +174,9 @@ class PostCommentAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "replies_count",
         "created_at",
     )
+    list_select_related = ("user", "post", "post__author",)
+    list_per_page = 50
+    show_full_result_count = False
     list_filter = ("is_edited",)
     raw_id_fields = ("post", "user", "parent_comment")
     readonly_fields = ("id", "replies_count", "created_at", "updated_at")
@@ -192,6 +202,7 @@ class PostCommentAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(SavedPost)
 class SavedPostAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ("short_id", "user", "post", "created_at")
+    list_select_related = ("user", "post", "post__author",)
     raw_id_fields = ("user", "post")
     readonly_fields = ("id", "created_at")
     search_fields = ("id", "user__email", "post__id")

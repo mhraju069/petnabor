@@ -23,6 +23,7 @@ class StoryAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "expires_at",
         "created_at",
     ]
+    list_select_related = ("author",)
     list_filter = ["media_type", "privacy"]
     search_fields = ["id", "author__email", "author__username", "text_content"]
     readonly_fields = ["id", "views_count", "created_at"]
@@ -92,6 +93,9 @@ class StoryAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(StoryView)
 class StoryViewAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ["short_id", "story", "viewer", "viewed_at"]
+    list_select_related = ("story", "story__author", "viewer",)
+    list_per_page = 50
+    show_full_result_count = False
     raw_id_fields = ["story", "viewer"]
     readonly_fields = ["id", "viewed_at"]
     search_fields = ["id", "viewer__email", "viewer__username"]
@@ -101,6 +105,7 @@ class StoryViewAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(StoryReaction)
 class StoryReactionAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ["short_id", "story", "user", "display_reaction_type", "created_at"]
+    list_select_related = ("story", "story__author", "user",)
     list_filter = ["reaction_type"]
     raw_id_fields = ["story", "user"]
     readonly_fields = ["id", "created_at"]
@@ -125,6 +130,7 @@ class StoryReactionAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(StoryReply)
 class StoryReplyAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ["short_id", "story", "user", "truncated_reply", "created_at"]
+    list_select_related = ("story", "story__author", "user",)
     raw_id_fields = ["story", "user"]
     readonly_fields = ["id", "created_at"]
     search_fields = ["id", "user__email", "reply_text"]

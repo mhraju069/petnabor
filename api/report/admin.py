@@ -33,6 +33,7 @@ class ReportAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_resolved",
         "created_at",
     )
+    list_select_related = ("reporter",)
     list_filter = ("target_type", "is_resolved")
     search_fields = (
         "id",
@@ -71,12 +72,18 @@ class ReportAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 
     # ── Columns / preview ────────────────────────────────────────────
 
+    def get_changelist_instance(self, request):
+        # One query per target type for the whole page (not per row).
+        changelist = super().get_changelist_instance(request)
+        moderation.prefetch_targets(changelist.result_list)
+        return changelist
+
     @display(description=_("Target"), ordering="target_type")
     def display_target(self, obj):
-        summary = moderation.describe_target(obj)
-        label = f"{obj.get_target_type_display()} · {summary.status}"
-        if summary.url:
-            return format_html('<a href="{}">{}</a>', summary.url, label)
+        label = f"{obj.get_target_type_display()} · {moderation.target_status(obj)}"
+        url = moderation.admin_url(moderation.get_target(obj))
+        if url:
+            return format_html('<a href="{}">{}</a>', url, label)
         return label
 
     @display(description=_("Posted by"))

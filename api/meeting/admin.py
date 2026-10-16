@@ -48,6 +48,7 @@ class MeetingAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_status",
         "created_at",
     )
+    list_select_related = ("sender", "receiver",)
     list_filter = ("status", "reason", "visit_date")
     search_fields = (
         "id",
@@ -152,6 +153,7 @@ class MeetingFeedbackAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_public",
         "created_at",
     )
+    list_select_related = ("reviewer", "reviewee", "meeting",)
     list_filter = ("is_public",)
     search_fields = (
         "id",

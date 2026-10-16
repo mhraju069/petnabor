@@ -36,6 +36,7 @@ class BlogAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_deleted",
         "created_at",
     )
+    list_select_related = ("author", "category",)
     list_filter = ("is_published", "is_deleted", "category")
     search_fields = ("id", "title", "author__username", "author__email")
     raw_id_fields = ("author",)
@@ -127,6 +128,7 @@ class BlogAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(BlogLike)
 class BlogLikeAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ("short_id", "blog", "user", "created_at")
+    list_select_related = ("blog", "user",)
     raw_id_fields = ("blog", "user")
     search_fields = ("id", "user__email", "blog__title")
     readonly_fields = ("id", "created_at")
@@ -142,6 +144,7 @@ class BlogCommentAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_deleted",
         "created_at",
     )
+    list_select_related = ("user", "blog",)
     list_filter = ("is_edited", "is_deleted")
     raw_id_fields = ("blog", "user", "parent_comment")
     search_fields = ("id", "comment_text", "user__username", "blog__title")
@@ -163,6 +166,9 @@ class BlogCommentAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(BlogViewTracker)
 class BlogViewTrackerAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ("short_id", "blog", "user", "ip_address", "created_at")
+    list_select_related = ("blog", "user",)
+    list_per_page = 50
+    show_full_result_count = False
     raw_id_fields = ("blog", "user")
     search_fields = ("id", "ip_address", "blog__title")
     readonly_fields = ("id", "created_at")

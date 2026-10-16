@@ -725,3 +725,48 @@ class ThreadMuteTest(MessagingBaseTestCase):
         self.client.force_authenticate(self.carol)
         response = self.client.post(self.mute_url)
         self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+
+
+# ──────────────────────────────────────────────
+# Admin privacy
+# ──────────────────────────────────────────────
+
+
+class MessageAdminPrivacyTest(MessagingBaseTestCase):
+    """Staff see message metadata, not content — unless the message is reported."""
+
+    def setUp(self):
+        super().setUp()
+        from .services import get_or_create_direct_thread
+
+        self.admin_user = User.objects.create_superuser(
+            email="admin@test.com", username="admin", phone="10000099", password="pass"
+        )
+        thread, _ = get_or_create_direct_thread(self.alice, self.bob)
+        self.private = Message.objects.create(thread=thread, sender=self.alice, text_content="my secret plans")
+        self.reported = Message.objects.create(thread=thread, sender=self.bob, text_content="nasty insult")
+        from api.report.models import Report
+
+        Report.objects.create(
+            reporter=self.alice, target_type="MESSAGE", target_id=self.reported.id, reason="abuse"
+        )
+        self.client.force_login(self.admin_user)
+
+    def test_list_hides_private_text_but_shows_reported(self):
+        response = self.client.get(reverse("admin:messaging_message_changelist"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "my secret plans")
+        self.assertContains(response, "nasty insult")
+
+    def test_content_is_not_searchable(self):
+        response = self.client.get(reverse("admin:messaging_message_changelist"), {"q": "secret"})
+        self.assertNotContains(response, str(self.private.id)[:8])
+
+    def test_detail_hides_private_text_and_is_read_only(self):
+        url = reverse("admin:messaging_message_change", args=[self.private.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "my secret plans")
+        self.client.post(url, {"text_content": "edited"})
+        self.private.refresh_from_db()
+        self.assertEqual(self.private.text_content, "my secret plans")

@@ -48,6 +48,7 @@ class ChatThreadAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "last_message_timestamp",
         "created_at",
     ]
+    list_select_related = ("created_by",)
     list_filter = ["thread_type"]
     search_fields = ["id", "name", "created_by__email", "created_by__username"]
     ordering = ["-last_message_timestamp"]
@@ -74,7 +75,8 @@ class ChatThreadAdmin(UUIDSearchMixin, UnfoldModelAdmin):
             _("Last Message"),
             {
                 "classes": ("collapse",),
-                "fields": ("last_message_text", "last_message_timestamp"),
+                # The text itself is private (see MessageAdmin).
+                "fields": ("last_message_timestamp",),
             },
         ),
         (
@@ -118,6 +120,7 @@ class ThreadParticipantAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "joined_at",
         "left_at",
     ]
+    list_select_related = ("thread", "user",)
     list_filter = ["role", "is_muted"]
     search_fields = ["id", "user__email", "user__username"]
     readonly_fields = ["id", "joined_at"]
@@ -149,6 +152,13 @@ class ThreadParticipantAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(UUIDSearchMixin, UnfoldModelAdmin):
+    """
+    Chat messages are private. Staff see metadata (who, when, type, status)
+    but not the content — except for messages someone has reported, which
+    moderators need to review. Messages can't be edited here, and content
+    isn't searchable.
+    """
+
     list_display = [
         "short_id",
         "sender",
@@ -159,26 +169,97 @@ class MessageAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_read",
         "created_at",
     ]
+    list_per_page = 50
+    show_full_result_count = False
     list_filter = ["message_type", "is_deleted_for_everyone", "is_read", "is_edited"]
-    search_fields = ["id", "sender__email", "sender__username", "text_content"]
+    search_fields = ["id", "sender__email", "sender__username"]
+    list_select_related = ["sender", "thread"]
     readonly_fields = ["id", "created_at", "updated_at"]
     raw_id_fields = ["thread", "sender", "reply_to"]
+    fields = [
+        "id",
+        "thread",
+        "sender",
+        "message_type",
+        "reported_content",
+        "is_read",
+        "is_edited",
+        "is_deleted_for_everyone",
+        "created_at",
+        "updated_at",
+    ]
     ordering = ["-created_at"]
     date_hierarchy = "created_at"
 
     actions = ["mark_deleted_for_everyone"]
 
+    def get_queryset(self, request):
+        from django.db.models import Exists, OuterRef
+
+        from api.report.models import Report
+
+        reported = Report.objects.filter(target_type="MESSAGE", target_id=OuterRef("pk"))
+        return super().get_queryset(request).annotate(is_reported=Exists(reported))
+
+    def get_readonly_fields(self, request, obj=None):
+        return self.fields  # view-only: nothing is editable
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
     @admin.action(description="Delete selected messages for everyone")
     def mark_deleted_for_everyone(self, request, queryset):
-        count = queryset.update(is_deleted_for_everyone=True, text_content=None)
+        # Per message (not queryset.update) so attached photos are removed
+        # from storage too.
+        count = 0
+        for message in queryset.filter(is_deleted_for_everyone=False):
+            message.is_deleted_for_everyone = True
+            message.text_content = None
+            message.media_url = None
+            message.media_file = None  # django-cleanup deletes the file
+            message.save(
+                update_fields=[
+                    "is_deleted_for_everyone", "text_content", "media_url", "media_file", "updated_at",
+                ]
+            )
+            count += 1
         self.message_user(request, f"{count} message(s) deleted for everyone.")
+
+    def _reported(self, obj) -> bool:
+        flag = getattr(obj, "is_reported", None)
+        if flag is None:
+            from api.report.models import Report
+
+            flag = Report.objects.filter(target_type="MESSAGE", target_id=obj.pk).exists()
+        return bool(flag)
 
     @display(description=_("Preview"))
     def display_preview(self, obj):
         if obj.is_deleted_for_everyone:
             return "⛔ Deleted"
+        if not self._reported(obj):
+            return f"🔒 Private {obj.message_type.lower()}"
         text = obj.text_content or obj.message_type
-        return text[:50] + "…" if len(text) > 50 else text
+        return "🚩 " + (text[:50] + "…" if len(text) > 50 else text)
+
+    @display(description=_("Content"))
+    def reported_content(self, obj):
+        from django.utils.html import format_html
+
+        if obj.is_deleted_for_everyone:
+            return "Deleted for everyone."
+        if not self._reported(obj):
+            return "Private — content is only shown for reported messages."
+        if obj.media_url:
+            return format_html(
+                '{}<br><a href="{}" target="_blank" rel="noopener">Open attachment</a>',
+                obj.text_content or "",
+                obj.media_url,
+            )
+        return obj.text_content or "—"
 
     @display(
         description=_("Type"),

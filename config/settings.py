@@ -8,6 +8,7 @@ import firebase_admin
 from firebase_admin import credentials
 from dotenv import load_dotenv
 import os
+import sys
 
 load_dotenv()
 
@@ -18,6 +19,10 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG") == "True"
+
+# Admin lives at a configurable, hard-to-guess path in production
+# (e.g. DJANGO_ADMIN_URL=staff-7f3k2/). Default keeps the usual /admin/.
+ADMIN_URL = os.getenv("DJANGO_ADMIN_URL", "admin").strip("/") + "/"
 
 ALLOWED_HOSTS = (
     os.getenv("DJANGO_ALLOWED_HOSTS").split(",")
@@ -75,6 +80,7 @@ INSTALLED_APPS = [
     "api.site_settings",
     "api.wishlist",
     "api.tip",
+    "axes",
 ]
 
 MIDDLEWARE = [
@@ -89,6 +95,8 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "api.users.middleware.UpdateLastActiveMiddleware",
     "api.users.middleware.VerificationEnforcementMiddleware",
+    # Keep last: turns repeated failed admin logins into a lockout response.
+    "axes.middleware.AxesMiddleware",
 ]
 
 CELERY_BROKER_URL = "redis://redis:6379/0"
@@ -276,6 +284,38 @@ else:
 if USE_CLOUDINARY:
     INSTALLED_APPS += ["cloudinary_storage", "cloudinary"]
 
+# django-cleanup: when a FileField/ImageField is replaced (new profile picture,
+# re-processed image…) or its row is deleted, delete the old file from storage
+# after the transaction commits. Must be the LAST entry in INSTALLED_APPS.
+INSTALLED_APPS += ["django_cleanup.apps.CleanupConfig"]
+
+# ── Admin login protection (django-axes) ─────────────────────────────────
+# 5 wrong passwords for the same username from the same IP lock that pair
+# out for an hour. Only Django's authenticate() (the admin login) is
+# affected — the app's API login has its own checks and DRF throttles.
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+AXES_ENABLED = "test" not in sys.argv  # test clients log in without a request
+AXES_FAILURE_LIMIT = int(os.getenv("AXES_FAILURE_LIMIT", "5"))
+AXES_COOLOFF_TIME = 1  # hours
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+AXES_RESET_ON_SUCCESS = True
+# Behind nginx: the client IP is in X-Forwarded-For (one proxy hop).
+AXES_IPWARE_PROXY_COUNT = 1
+AXES_IPWARE_META_PRECEDENCE_ORDER = ["HTTP_X_FORWARDED_FOR", "REMOTE_ADDR"]
+
+# ── Session / CSRF cookies ───────────────────────────────────────────────
+# HTTPS-only cookies in production (override with SECURE_COOKIES=False for
+# plain-HTTP local runs). Sessions are only used by the admin; they expire
+# after 8 hours.
+SECURE_COOKIES = os.getenv("SECURE_COOKIES", str(not DEBUG)) == "True"
+SESSION_COOKIE_SECURE = SECURE_COOKIES
+CSRF_COOKIE_SECURE = SECURE_COOKIES
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_AGE = 60 * 60 * 8
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # django-unfold Admin Configuration
@@ -322,7 +362,7 @@ UNFOLD = {
                     {
                         "title": "Overview",
                         "icon": "dashboard",
-                        "link": "/admin/",
+                        "link": f"/{ADMIN_URL}",
                     },
                 ],
             },
@@ -333,18 +373,18 @@ UNFOLD = {
                     {
                         "title": "Users",
                         "icon": "people",
-                        "link": "/admin/users/user/",
+                        "link": f"/{ADMIN_URL}users/user/",
                         "badge": "api.users.admin_utils.user_count_badge",
                     },
                     {
                         "title": "Profiles",
                         "icon": "manage_accounts",
-                        "link": "/admin/users/profile/",
+                        "link": f"/{ADMIN_URL}users/profile/",
                     },
                     {
                         "title": "OTP Verifications",
                         "icon": "verified",
-                        "link": "/admin/users/otpverification/",
+                        "link": f"/{ADMIN_URL}users/otpverification/",
                     },
                 ],
             },
@@ -355,32 +395,32 @@ UNFOLD = {
                     {
                         "title": "Posts",
                         "icon": "article",
-                        "link": "/admin/post/post/",
+                        "link": f"/{ADMIN_URL}post/post/",
                     },
                     {
                         "title": "Post Media",
                         "icon": "perm_media",
-                        "link": "/admin/post/postmedia/",
+                        "link": f"/{ADMIN_URL}post/postmedia/",
                     },
                     {
                         "title": "Post Likes",
                         "icon": "thumb_up",
-                        "link": "/admin/post/postlike/",
+                        "link": f"/{ADMIN_URL}post/postlike/",
                     },
                     {
                         "title": "Post Comments",
                         "icon": "comment",
-                        "link": "/admin/post/postcomment/",
+                        "link": f"/{ADMIN_URL}post/postcomment/",
                     },
                     {
                         "title": "Saved Posts",
                         "icon": "bookmark",
-                        "link": "/admin/post/savedpost/",
+                        "link": f"/{ADMIN_URL}post/savedpost/",
                     },
                     {
                         "title": "Hashtags",
                         "icon": "tag",
-                        "link": "/admin/post/hashtag/",
+                        "link": f"/{ADMIN_URL}post/hashtag/",
                     },
                 ],
             },
@@ -391,22 +431,22 @@ UNFOLD = {
                     {
                         "title": "Stories",
                         "icon": "auto_stories",
-                        "link": "/admin/story/story/",
+                        "link": f"/{ADMIN_URL}story/story/",
                     },
                     {
                         "title": "Story Views",
                         "icon": "visibility",
-                        "link": "/admin/story/storyview/",
+                        "link": f"/{ADMIN_URL}story/storyview/",
                     },
                     {
                         "title": "Story Reactions",
                         "icon": "favorite",
-                        "link": "/admin/story/storyreaction/",
+                        "link": f"/{ADMIN_URL}story/storyreaction/",
                     },
                     {
                         "title": "Story Replies",
                         "icon": "reply",
-                        "link": "/admin/story/storyreply/",
+                        "link": f"/{ADMIN_URL}story/storyreply/",
                     },
                 ],
             },
@@ -417,27 +457,27 @@ UNFOLD = {
                     {
                         "title": "Blogs",
                         "icon": "rss_feed",
-                        "link": "/admin/blog/blog/",
+                        "link": f"/{ADMIN_URL}blog/blog/",
                     },
                     {
                         "title": "Blog Categories",
                         "icon": "category",
-                        "link": "/admin/blog/blogcategory/",
+                        "link": f"/{ADMIN_URL}blog/blogcategory/",
                     },
                     {
                         "title": "Blog Likes",
                         "icon": "thumb_up",
-                        "link": "/admin/blog/bloglike/",
+                        "link": f"/{ADMIN_URL}blog/bloglike/",
                     },
                     {
                         "title": "Blog Comments",
                         "icon": "comment",
-                        "link": "/admin/blog/blogcomment/",
+                        "link": f"/{ADMIN_URL}blog/blogcomment/",
                     },
                     {
                         "title": "Blog Views",
                         "icon": "visibility",
-                        "link": "/admin/blog/blogviewtracker/",
+                        "link": f"/{ADMIN_URL}blog/blogviewtracker/",
                     },
                 ],
             },
@@ -448,17 +488,17 @@ UNFOLD = {
                     {
                         "title": "Friend Requests",
                         "icon": "person_add",
-                        "link": "/admin/friends/friendrequest/",
+                        "link": f"/{ADMIN_URL}friends/friendrequest/",
                     },
                     {
                         "title": "Friendships",
                         "icon": "group",
-                        "link": "/admin/friends/friendship/",
+                        "link": f"/{ADMIN_URL}friends/friendship/",
                     },
                     {
                         "title": "User Blocks",
                         "icon": "block",
-                        "link": "/admin/friends/userblock/",
+                        "link": f"/{ADMIN_URL}friends/userblock/",
                     },
                 ],
             },
@@ -469,12 +509,12 @@ UNFOLD = {
                     {
                         "title": "Meetings",
                         "icon": "event",
-                        "link": "/admin/meeting/meeting/",
+                        "link": f"/{ADMIN_URL}meeting/meeting/",
                     },
                     {
                         "title": "Meeting Feedback",
                         "icon": "rate_review",
-                        "link": "/admin/meeting/meetingfeedback/",
+                        "link": f"/{ADMIN_URL}meeting/meetingfeedback/",
                     },
                 ],
             },
@@ -485,17 +525,17 @@ UNFOLD = {
                     {
                         "title": "Chat Threads",
                         "icon": "forum",
-                        "link": "/admin/messaging/chatthread/",
+                        "link": f"/{ADMIN_URL}messaging/chatthread/",
                     },
                     {
                         "title": "Thread Participants",
                         "icon": "group_add",
-                        "link": "/admin/messaging/threadparticipant/",
+                        "link": f"/{ADMIN_URL}messaging/threadparticipant/",
                     },
                     {
                         "title": "Messages",
                         "icon": "chat",
-                        "link": "/admin/messaging/message/",
+                        "link": f"/{ADMIN_URL}messaging/message/",
                     },
                 ],
             },
@@ -506,7 +546,7 @@ UNFOLD = {
                     {
                         "title": "Pet Profiles",
                         "icon": "pets",
-                        "link": "/admin/pet/petprofile/",
+                        "link": f"/{ADMIN_URL}pet/petprofile/",
                     },
                 ],
             },
@@ -517,7 +557,7 @@ UNFOLD = {
                     {
                         "title": "Reports",
                         "icon": "flag",
-                        "link": "/admin/report/report/",
+                        "link": f"/{ADMIN_URL}report/report/",
                         "badge": "api.users.admin_utils.pending_reports_badge",
                     },
                 ],
@@ -529,17 +569,17 @@ UNFOLD = {
                     {
                         "title": "Sent Notifications",
                         "icon": "notifications",
-                        "link": "/admin/notifications/notifications/",
+                        "link": f"/{ADMIN_URL}notifications/notifications/",
                     },
                     {
                         "title": "FCM Devices",
                         "icon": "devices",
-                        "link": "/admin/notifications/fcmdevice/",
+                        "link": f"/{ADMIN_URL}notifications/fcmdevice/",
                     },
                     {
                         "title": "Settings",
                         "icon": "tune",
-                        "link": "/admin/notifications/notificationsettings/",
+                        "link": f"/{ADMIN_URL}notifications/notificationsettings/",
                     },
                 ],
             },
@@ -550,17 +590,17 @@ UNFOLD = {
                     {
                         "title": "Referral Settings",
                         "icon": "settings",
-                        "link": "/admin/referral/referralsettings/",
+                        "link": f"/{ADMIN_URL}referral/referralsettings/",
                     },
                     {
                         "title": "Wallets",
                         "icon": "wallet",
-                        "link": "/admin/referral/referralwallet/",
+                        "link": f"/{ADMIN_URL}referral/referralwallet/",
                     },
                     {
                         "title": "Transactions",
                         "icon": "receipt_long",
-                        "link": "/admin/referral/referraltransaction/",
+                        "link": f"/{ADMIN_URL}referral/referraltransaction/",
                     },
                 ],
             },
@@ -571,42 +611,42 @@ UNFOLD = {
                     {
                         "title": "Vendors",
                         "icon": "storefront",
-                        "link": "/admin/vendor/vendor/",
+                        "link": f"/{ADMIN_URL}vendor/vendor/",
                     },
                     {
                         "title": "Vendor Plans",
                         "icon": "card_membership",
-                        "link": "/admin/vendor/vendorplan/",
+                        "link": f"/{ADMIN_URL}vendor/vendorplan/",
                     },
                     {
                         "title": "Subscriptions",
                         "icon": "subscriptions",
-                        "link": "/admin/vendor/vendorsubscription/",
+                        "link": f"/{ADMIN_URL}vendor/vendorsubscription/",
                     },
                     {
                         "title": "Products",
                         "icon": "inventory_2",
-                        "link": "/admin/product/product/",
+                        "link": f"/{ADMIN_URL}product/product/",
                     },
                     {
                         "title": "Categories",
                         "icon": "category",
-                        "link": "/admin/product/categories/",
+                        "link": f"/{ADMIN_URL}product/categories/",
                     },
                     {
                         "title": "Brands",
                         "icon": "verified",
-                        "link": "/admin/product/brand/",
+                        "link": f"/{ADMIN_URL}product/brand/",
                     },
                     {
                         "title": "Wishlists",
                         "icon": "favorite",
-                        "link": "/admin/wishlist/productwishlist/",
+                        "link": f"/{ADMIN_URL}wishlist/productwishlist/",
                     },
                     {
                         "title": "Product Events",
                         "icon": "analytics",
-                        "link": "/admin/product/productevent/",
+                        "link": f"/{ADMIN_URL}product/productevent/",
                     },
                 ],
             },
@@ -617,22 +657,22 @@ UNFOLD = {
                     {
                         "title": "Tip Settings",
                         "icon": "tune",
-                        "link": "/admin/tip/tipsettings/",
+                        "link": f"/{ADMIN_URL}tip/tipsettings/",
                     },
                     {
                         "title": "Connect Accounts",
                         "icon": "account_balance",
-                        "link": "/admin/tip/stripeconnectaccount/",
+                        "link": f"/{ADMIN_URL}tip/stripeconnectaccount/",
                     },
                     {
                         "title": "Tips",
                         "icon": "volunteer_activism",
-                        "link": "/admin/tip/tip/",
+                        "link": f"/{ADMIN_URL}tip/tip/",
                     },
                     {
                         "title": "Withdrawals",
                         "icon": "payments",
-                        "link": "/admin/tip/tipwithdrawal/",
+                        "link": f"/{ADMIN_URL}tip/tipwithdrawal/",
                     },
                 ],
             },
@@ -643,7 +683,7 @@ UNFOLD = {
                     {
                         "title": "Global Settings",
                         "icon": "settings_applications",
-                        "link": "/admin/site_settings/sitesettings/",
+                        "link": f"/{ADMIN_URL}site_settings/sitesettings/",
                     },
                 ],
             },

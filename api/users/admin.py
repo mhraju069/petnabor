@@ -172,6 +172,7 @@ class UserAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(Profile)
 class ProfileAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ("short_id", "user", "city", "state", "referral_code", "display_avatar")
+    list_select_related = ("user",)
     search_fields = (
         "id",
         "user__email",
@@ -206,6 +207,9 @@ class OTPVerificationAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "expires_at",
         "created_at",
     )
+    list_select_related = ("user",)
+    list_per_page = 50
+    show_full_result_count = False
     list_filter = ("otp_type", "is_used")
     search_fields = ("id", "user__email", "user__phone")
     ordering = ("-created_at",)

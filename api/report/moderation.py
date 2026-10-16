@@ -43,12 +43,79 @@ def _model(target_type):
     }.get(target_type)
 
 
+# Who "owns" each kind of target (also what to preload with it).
+_OWNER_FIELD = {
+    T.POST: "author",
+    T.COMMENT: "user",
+    T.STORY: "author",
+    T.MESSAGE: "sender",
+    T.BLOG: "author",
+    T.MEETING: "sender",
+}
+
+_MISSING = object()
+
+
+def _manager(model):
+    return getattr(model, "all_objects", None) or model._default_manager
+
+
 def get_target(report: Report):
+    cached = getattr(report, "_target_cache", _MISSING)
+    if cached is not _MISSING:
+        return cached
     model = _model(report.target_type)
     if not model:
         return None
-    manager = getattr(model, "all_objects", None) or model._default_manager
-    return manager.filter(pk=report.target_id).first()
+    qs = _manager(model).filter(pk=report.target_id)
+    owner_field = _OWNER_FIELD.get(report.target_type)
+    if owner_field:
+        qs = qs.select_related(owner_field)
+    target = qs.first()
+    report._target_cache = target
+    return target
+
+
+def prefetch_targets(reports) -> None:
+    """
+    Load the reported items (and their authors) for a page of reports with
+    one query per target type, instead of several queries per row.
+    """
+    by_type = {}
+    for report in reports:
+        by_type.setdefault(report.target_type, []).append(report)
+    for target_type, group in by_type.items():
+        model = _model(target_type)
+        if not model:
+            for report in group:
+                report._target_cache = None
+            continue
+        qs = _manager(model).filter(pk__in={r.target_id for r in group})
+        owner_field = _OWNER_FIELD.get(target_type)
+        if owner_field:
+            qs = qs.select_related(owner_field)
+        found = {str(obj.pk): obj for obj in qs}
+        for report in group:
+            report._target_cache = found.get(str(report.target_id))
+
+
+def target_status(report: Report) -> str:
+    """Short status for list columns (no extra queries once prefetched)."""
+    target = get_target(report)
+    if target is None:
+        return "Already deleted"
+    t = report.target_type
+    if t == T.POST:
+        return "Removed" if target.is_deleted else "Live"
+    if t == T.MESSAGE:
+        return "Deleted for everyone" if target.is_deleted_for_everyone else "Live"
+    if t == T.BLOG:
+        return "Removed" if target.is_deleted else ("Published" if target.is_published else "Draft")
+    if t == T.USER:
+        return "Active" if target.is_active else "Suspended"
+    if t == T.MEETING:
+        return getattr(target, "status", "")
+    return "Live"
 
 
 def target_owner(report: Report, target=None) -> Optional[User]:
@@ -123,6 +190,29 @@ def describe_target(report: Report) -> TargetSummary:
     return summary
 
 
+def _delete_files_on_commit(obj, field_names) -> None:
+    """
+    Remove an object's stored files once the transaction commits. Explicit,
+    so it works whether or not django-cleanup is installed (a second delete
+    of the same file is harmless).
+    """
+    names = []
+    for field_name in field_names:
+        file = getattr(obj, field_name, None)
+        if file and getattr(file, "name", None):
+            names.append((file.storage, file.name))
+
+    def run():
+        for storage, name in names:
+            try:
+                storage.delete(name)
+            except Exception:  # never fail moderation over a storage hiccup
+                pass
+
+    if names:
+        transaction.on_commit(run)
+
+
 def resolve_related(report: Report) -> int:
     """Resolve every open report about the same item (duplicates included)."""
     return Report.objects.filter(
@@ -145,18 +235,24 @@ def remove_content(report: Report) -> str:
         return "Already deleted — report resolved."
 
     if t == T.POST:
-        from api.post.services import PostService
+        from api.post.models import PostMedia
 
         target.is_deleted = True
         target.save(update_fields=["is_deleted", "updated_at"])
-        PostService.purge_media(target)  # files removed from storage
+        # Take the photos/videos down too (rows + files in storage).
+        for media in PostMedia.objects.filter(post=target):
+            _delete_files_on_commit(media, ("file", "medium_file", "thumbnail_file"))
+            media.delete()
     elif t == T.COMMENT:
         from api.post.services import CommentService
 
+        _delete_files_on_commit(target, ("media_file",))
         CommentService.delete_comment(target)
     elif t == T.STORY:
-        target.delete()  # django-cleanup removes the media file
+        _delete_files_on_commit(target, ("media",))
+        target.delete()
     elif t == T.MESSAGE:
+        _delete_files_on_commit(target, ("media_file",))
         target.is_deleted_for_everyone = True
         target.text_content = None
         target.media_url = None

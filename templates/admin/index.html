@@ -196,7 +196,7 @@
               <p class="text-[10px] font-black text-rose-500 uppercase mb-2">{{ report.reason|truncatechars:25 }}</p>
               <div class="flex items-center justify-between gap-2">
                 <span class="text-xs font-bold text-gray-800 dark:text-gray-200 truncate">Issue #{{ report.id|stringformat:"str"|slice:":8" }}</span>
-                <a href="/admin/report/report/{{ report.id }}/change/" class="shrink-0 text-[10px] font-black px-4 py-2 bg-rose-500 text-white rounded-full hover:scale-105 transition-transform">Review</a>
+                <a href="{% url 'admin:report_report_change' report.id %}" class="shrink-0 text-[10px] font-black px-4 py-2 bg-rose-500 text-white rounded-full hover:scale-105 transition-transform">Review</a>
               </div>
             </div>
             {% empty %}

@@ -20,6 +20,7 @@ class NotificationSettingsAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_email",
         "display_message",
     )
+    list_select_related = ("user",)
     search_fields = ("id", "user__email", "user__username")
     ordering = ("user__id",)
     raw_id_fields = ("user",)
@@ -110,6 +111,9 @@ class NotificationsAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "display_read",
         "created_at",
     )
+    list_select_related = ("user",)
+    list_per_page = 50
+    show_full_result_count = False
     list_filter = ("notification_type", "is_read")
     search_fields = ("id", "user__email", "user__username", "title", "body")
     ordering = ("-created_at",)
@@ -151,6 +155,7 @@ class NotificationsAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(FCMDevice)
 class FCMDeviceAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ("short_id", "user", "truncated_token", "created_at")
+    list_select_related = ("user",)
     search_fields = ("id", "user__email", "user__username", "registration_id")
     ordering = ("-created_at",)
     readonly_fields = ("id", "created_at")

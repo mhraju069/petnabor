@@ -25,6 +25,7 @@ class PetProfileAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "user",
         "created_at",
     )
+    list_select_related = ("user",)
     list_filter = ("pet_type", "size", "weight_type", "vaccination_status")
     search_fields = ("id", "pet_name", "user__email", "user__username", "pet_type")
     ordering = ("-created_at",)

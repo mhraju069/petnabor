@@ -1,3 +1,4 @@
+from django.conf import settings
 """
 Authentication and activity tracking middleware.
 """
@@ -24,7 +25,7 @@ AUTH_WHITELISTED_PATHS = (
     "/api/users/resend-email-otp/",
     "/api/users/password-reset/",
     "/api/users/token/refresh/",
-    "/admin/",
+    "/" + settings.ADMIN_URL,  # wherever DJANGO_ADMIN_URL puts the admin
 )
 
 # Throttle last_active DB writes (seconds)

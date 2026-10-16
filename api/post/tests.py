@@ -293,3 +293,64 @@ class InteractionAPITest(PostBaseTestCase):
         self.client.force_authenticate(self.alice)
         response = self.client.post(url)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+
+class PostDeleteRemovesMediaTest(PostBaseTestCase):
+    """Deleting a post removes its media files from storage (Cloudinary)."""
+
+    def _deleted_file_names(self, post):
+        from unittest import mock
+        from django.db.models.fields.files import FieldFile
+
+        deleted = []
+
+        def fake_delete(field_file, save=True):
+            deleted.append(field_file.name)
+
+        self.client.force_authenticate(self.alice)
+        with mock.patch.object(FieldFile, "delete", autospec=True, side_effect=fake_delete):
+            # django-cleanup deletes files after the transaction commits.
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.delete(reverse("post-detail", kwargs={"pk": post.id}))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return deleted
+
+    def test_post_media_files_are_deleted(self):
+        post = Post.objects.create(author=self.alice, content_text="With photo")
+        PostMedia.objects.create(
+            post=post,
+            media_type="IMAGE",
+            file="post_media/a.webp",
+            medium_file="post_media/a_medium.webp",
+            thumbnail_file="post_media/a_thumb.webp",
+        )
+
+        deleted = self._deleted_file_names(post)
+
+        post.refresh_from_db()
+        self.assertTrue(post.is_deleted)
+        self.assertEqual(PostMedia.objects.filter(post=post).count(), 0)
+        self.assertCountEqual(
+            deleted,
+            ["post_media/a.webp", "post_media/a_medium.webp", "post_media/a_thumb.webp"],
+        )
+
+    def test_comment_attachments_are_deleted(self):
+        post = Post.objects.create(author=self.alice, content_text="Text post")
+        comment = PostComment.objects.create(
+            post=post, user=self.bob, comment_text="pic", media_file="comment_media/c.webp"
+        )
+
+        deleted = self._deleted_file_names(post)
+
+        comment.refresh_from_db()
+        self.assertFalse(comment.media_file)
+        self.assertIn("comment_media/c.webp", deleted)
+
+    def test_other_users_cannot_delete(self):
+        post = Post.objects.create(author=self.alice, content_text="Mine")
+        PostMedia.objects.create(post=post, media_type="IMAGE", file="post_media/b.webp")
+        self.client.force_authenticate(self.bob)
+        response = self.client.delete(reverse("post-detail", kwargs={"pk": post.id}))
+        self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertEqual(PostMedia.objects.filter(post=post).count(), 1)

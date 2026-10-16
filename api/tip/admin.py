@@ -53,6 +53,7 @@ class StripeConnectAccountAdmin(ModelAdmin):
         "is_payouts_enabled",
         "created_at",
     )
+    list_select_related = ("user",)
     list_filter = ("is_onboarding_complete", "is_charges_enabled", "is_payouts_enabled")
     search_fields = ("user__email", "user__phone", "stripe_account_id")
     readonly_fields = (
@@ -86,6 +87,7 @@ class TipAdmin(ModelAdmin):
         "status_badge",
         "created_at",
     )
+    list_select_related = ("tipper", "recipient",)
     list_filter = ("status", "currency", "created_at")
     search_fields = (
         "tipper__email",
@@ -160,6 +162,7 @@ class TipWithdrawalAdmin(ModelAdmin):
         "stripe_payout_id",
         "created_at",
     )
+    list_select_related = ("user",)
     list_filter = ("status", "currency", "created_at")
     search_fields = ("user__email", "user__phone", "stripe_payout_id")
     readonly_fields = (

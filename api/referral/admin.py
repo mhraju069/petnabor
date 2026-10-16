@@ -63,6 +63,7 @@ class ReferralSettingsAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 @admin.register(ReferralWallet)
 class ReferralWalletAdmin(UUIDSearchMixin, UnfoldModelAdmin):
     list_display = ["short_id", "user", "display_balance", "updated_at"]
+    list_select_related = ("user",)
     search_fields = ["id", "user__email", "user__phone"]
     readonly_fields = ["id", "user", "balance", "created_at", "updated_at"]
     ordering = ["-balance"]
@@ -90,6 +91,7 @@ class ReferralTransactionAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         "related_user",
         "created_at",
     ]
+    list_select_related = ("wallet", "wallet__user", "related_user",)
     list_filter = ["transaction_type", "status"]
     search_fields = ["id", "wallet__user__email", "related_user__email", "note"]
     ordering = ["-created_at"]
