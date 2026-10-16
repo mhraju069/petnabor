@@ -154,7 +154,10 @@ class NotificationsAdmin(UUIDSearchMixin, UnfoldModelAdmin):
 
 @admin.register(FCMDevice)
 class FCMDeviceAdmin(UUIDSearchMixin, UnfoldModelAdmin):
-    list_display = ("short_id", "user", "truncated_token", "created_at")
+    # custom_notifications: True once a new app build registered this
+    # device; only those get pushes with the sender's photo.
+    list_display = ("short_id", "user", "truncated_token", "custom_notifications", "created_at")
+    list_filter = ("custom_notifications",)
     list_select_related = ("user",)
     search_fields = ("id", "user__email", "user__username", "registration_id")
     ordering = ("-created_at",)
