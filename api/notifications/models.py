@@ -46,6 +46,10 @@ class FCMDevice(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="fcm_devices")
     registration_id = models.CharField(max_length=500)  # FCM v1 tokens can exceed 255 chars
+    # Set by app versions that draw chat notifications themselves (sender
+    # photo, one stacked notification per chat). Those devices get chat
+    # pushes as data-only messages; older versions keep normal pushes.
+    custom_chat_notifications = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

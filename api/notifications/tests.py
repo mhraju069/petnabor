@@ -250,3 +250,64 @@ class FCMTokenHandlingTests(TestCase):
                 )
             except Exception as e:
                 self.fail(f"Task raised unexpectedly for invalid token: {e}")
+
+
+class ChatPushStyleTests(TestCase):
+    """
+    App versions that draw their own chat notifications get chat pushes as
+    data-only messages; older versions keep normal system notifications.
+    """
+
+    def setUp(self):
+        from .models import FCMDevice
+
+        self.user = _make_user("chat_push", "chatpush@test.com")
+        NotificationSettings.objects.filter(user=self.user).update(push_notifications=True)
+        FCMDevice.objects.create(user=self.user, registration_id="old_app")
+        FCMDevice.objects.create(
+            user=self.user, registration_id="new_app", custom_chat_notifications=True
+        )
+
+    def _send(self, notification_type):
+        def fake_send(message):
+            response = MagicMock()
+            response.success_count = len(message.tokens)
+            response.failure_count = 0
+            response.responses = []
+            return response
+
+        with patch(
+            "api.notifications.services.messaging.send_each_for_multicast",
+            side_effect=fake_send,
+        ) as send:
+            _process_notification_batch(
+                user_ids=[str(self.user.id)],
+                title="Alice",
+                body="hi",
+                data={"thread_id": "t1", "sender_avatar": "https://x/a.jpg"},
+                notification_type=notification_type,
+                save_to_db=False,
+            )
+        return {tuple(c.args[0].tokens): c.args[0] for c in send.call_args_list}
+
+    def test_chat_message_is_data_only_for_new_app(self):
+        sent = self._send(NotificationTypes.MESSAGE)
+
+        rich = sent[("new_app",)]
+        self.assertIsNone(rich.notification)
+        self.assertIsNone(rich.android.notification)
+        self.assertEqual(rich.data["title"], "Alice")
+        self.assertEqual(rich.data["body"], "hi")
+        self.assertEqual(rich.data["sender_avatar"], "https://x/a.jpg")
+
+        plain = sent[("old_app",)]
+        self.assertEqual(plain.notification.title, "Alice")
+        # iOS groups a chat's notifications together.
+        self.assertEqual(plain.apns.payload.aps.thread_id, "t1")
+
+    def test_other_types_stay_normal_notifications(self):
+        sent = self._send(NotificationTypes.SYSTEM)
+        self.assertEqual(len(sent), 1)
+        (message,) = sent.values()
+        self.assertEqual(sorted(message.tokens), ["new_app", "old_app"])
+        self.assertIsNotNone(message.notification)

@@ -30,7 +30,7 @@ def notify_new_message(self, message_id, thread_id, sender_id, recipient_ids, te
         text_preview:  First 100 chars of the message for the notification body.
     """
     try:
-        sender = User.objects.filter(id=sender_id).first()
+        sender = User.objects.select_related("profile").filter(id=sender_id).first()
         if not sender:
             logger.warning("notify_new_message: sender %s not found", sender_id)
             return
@@ -38,6 +38,22 @@ def notify_new_message(self, message_id, thread_id, sender_id, recipient_ids, te
         sender_display = f"{sender.first_name} {sender.last_name}".strip() or sender.username or sender.email or "Someone"
         title = sender_display
         body = f"{text_preview}"
+
+        # Shown in the app's conversation-style notification (Android).
+        avatar = ""
+        profile = getattr(sender, "profile", None)
+        picture = getattr(profile, "profile_picture", None)
+        if picture:
+            try:
+                url = picture.url
+                avatar = url if url.startswith("http") else ""
+            except Exception:
+                avatar = ""
+
+        from .models import ChatThread, ThreadTypes
+
+        thread = ChatThread.objects.filter(id=thread_id).only("thread_type", "name").first()
+        is_group = bool(thread and thread.thread_type == ThreadTypes.GROUP)
 
         send_notification(
             user_ids=recipient_ids,
@@ -51,6 +67,10 @@ def notify_new_message(self, message_id, thread_id, sender_id, recipient_ids, te
                 "sender_id": sender_id,
                 "message": text_preview,
                 "type": "new_message",
+                "sender_name": sender_display,
+                "sender_avatar": avatar,
+                "is_group": "1" if is_group else "",
+                "thread_name": (thread.name or "") if is_group else "",
             },
         )
     except Exception as exc:

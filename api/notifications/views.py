@@ -55,6 +55,9 @@ class FCMDeviceView(APIView):
                 registration_id=registration_id,
                 defaults={
                     "user": request.user,
+                    "custom_chat_notifications": serializer.validated_data.get(
+                        "custom_chat_notifications", False
+                    ),
                 },
             )
             if created:

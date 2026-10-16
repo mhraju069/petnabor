@@ -32,7 +32,7 @@ class NotificationSettingsSerializer(serializers.ModelSerializer):
 class FCMDeviceSerializer(serializers.ModelSerializer):
     class Meta:
         model = FCMDevice
-        fields = ["id", "user", "registration_id", "created_at"]
+        fields = ["id", "user", "registration_id", "custom_chat_notifications", "created_at"]
         read_only_fields = ["id", "user", "created_at"]
 
 

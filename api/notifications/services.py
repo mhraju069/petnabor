@@ -107,6 +107,60 @@ def send_notification(
     return f"Notification queued for {total_count} users."
 
 
+def _build_multicast(tokens, title, body, payload_data, notification_type, data_only):
+    """
+    data_only=True: no notification block, so Android hands the push to the
+    app, which shows it itself (conversation style). Title and body travel
+    in the data instead.
+    """
+    is_message = notification_type == NotificationTypes.MESSAGE
+    # iOS stacks notifications that share a thread-id (one group per chat).
+    thread_id = payload_data.get("thread_id") if is_message else None
+
+    if data_only:
+        return messaging.MulticastMessage(
+            data={**payload_data, "title": title, "body": body},
+            tokens=tokens,
+            android=messaging.AndroidConfig(priority="high"),
+        )
+
+    return messaging.MulticastMessage(
+        notification=messaging.Notification(title=title, body=body),
+        data=payload_data,
+        tokens=tokens,
+        android=messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                priority="high",
+                sound="default",
+                channel_id="high-priority",
+                default_vibrate_timings=True,
+                default_sound=True,
+            ),
+        ),
+        apns=messaging.APNSConfig(
+            headers={"apns-priority": "10"},
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    alert=messaging.ApsAlert(title=title, body=body),
+                    badge=1,
+                    sound="default",
+                    content_available=True,
+                    thread_id=thread_id,
+                )
+            ),
+        ),
+        webpush=messaging.WebpushConfig(
+            headers={"Urgency": "high"},
+            notification=messaging.WebpushNotification(
+                title=title,
+                body=body,
+                icon="/static/icons/notification-icon.png",
+            ),
+        ),
+    )
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=5)
 def _process_notification_batch(
     self, user_ids, title, body, data=None, notification_type=NotificationTypes.INFO, save_to_db=True, retry_tokens=None
@@ -174,90 +228,72 @@ def _process_notification_batch(
         if data:
             payload_data.update({k: str(v) for k, v in data.items()})
 
-        android_config = messaging.AndroidConfig(
-            priority="high",
-            notification=messaging.AndroidNotification(
-                priority="high",
-                sound="default",
-                channel_id="high-priority",
-                default_vibrate_timings=True,
-                default_sound=True,
-            ),
-        )
+        # Chat messages go as data-only pushes to app versions that draw
+        # their own conversation-style notification (sender photo, messages
+        # stacked per chat). Everything else, and older app versions, get a
+        # normal system notification.
+        rich_tokens = set()
+        if notification_type == NotificationTypes.MESSAGE:
+            rich_tokens = set(
+                FCMDevice.objects.filter(
+                    registration_id__in=tokens, custom_chat_notifications=True
+                ).values_list("registration_id", flat=True)
+            )
+        plain = [t for t in tokens if t not in rich_tokens]
+        rich = [t for t in tokens if t in rich_tokens]
+        groups = [(group, data_only) for group, data_only in ((plain, False), (rich, True)) if group]
 
-        apns_config = messaging.APNSConfig(
-            headers={"apns-priority": "10"},
-            payload=messaging.APNSPayload(
-                aps=messaging.Aps(
-                    alert=messaging.ApsAlert(title=title, body=body),
-                    badge=1,
-                    sound="default",
-                    content_available=True,
-                )
-            ),
-        )
-
-        webpush_config = messaging.WebpushConfig(
-            headers={"Urgency": "high"},
-            notification=messaging.WebpushNotification(
-                title=title,
-                body=body,
-                icon="/static/icons/notification-icon.png",
-            ),
-        )
-
-        fcm_message = messaging.MulticastMessage(
-            notification=messaging.Notification(title=title, body=body),
-            data=payload_data,
-            tokens=tokens,
-            android=android_config,
-            apns=apns_config,
-            webpush=webpush_config,
-        )
-
-        response = messaging.send_each_for_multicast(fcm_message)
-
+        success_count = 0
+        failure_count = 0
         invalid_tokens = []
         transient_tokens = []
         fatal_failures = 0
 
-        if response.failure_count > 0:
-            for idx, resp in enumerate(response.responses):
-                if not resp.success:
-                    err_name = type(resp.exception).__name__
-                    if err_name in ('InvalidArgumentError', 'NotFoundError', 'UnregisteredError', 'SenderIdMismatchError'):
-                        # Bad tokens are removed and not retried
-                        invalid_tokens.append(tokens[idx])
-                        logger.warning(
-                            "[notify] Removing invalid FCM token (idx=%d): %s",
-                            idx, err_name,
-                        )
-                    elif err_name in ('UnavailableError', 'InternalError', 'TimeoutError'):
-                        # Server errors on Google's side — we should retry
-                        transient_tokens.append(tokens[idx])
-                        logger.warning(
-                            "[notify] Transient FCM server error (idx=%d): %s",
-                            idx, resp.exception,
-                        )
-                    else:
-                        # Auth errors, Quota errors, etc. Systemic token issues — delete them as well
-                        fatal_failures += 1
-                        invalid_tokens.append(tokens[idx])
-                        logger.error(
-                            "[notify] Fatal configuration/auth FCM error (idx=%d): [%s] %s. Token scheduled for deletion.",
-                            idx, err_name, resp.exception,
-                        )
+        for group_tokens, data_only in groups:
+            fcm_message = _build_multicast(
+                group_tokens, title, body, payload_data, notification_type, data_only
+            )
+            response = messaging.send_each_for_multicast(fcm_message)
+            success_count += response.success_count
+            failure_count += response.failure_count
 
-            if invalid_tokens:
-                FCMDevice.objects.filter(registration_id__in=invalid_tokens).delete()
-                logger.info(
-                    "[notify] Deleted %d invalid FCM tokens.", len(invalid_tokens)
-                )
+            for idx, resp in enumerate(response.responses):
+                if resp.success:
+                    continue
+                err_name = type(resp.exception).__name__
+                if err_name in ('InvalidArgumentError', 'NotFoundError', 'UnregisteredError', 'SenderIdMismatchError'):
+                    # Bad tokens are removed and not retried
+                    invalid_tokens.append(group_tokens[idx])
+                    logger.warning(
+                        "[notify] Removing invalid FCM token (idx=%d): %s",
+                        idx, err_name,
+                    )
+                elif err_name in ('UnavailableError', 'InternalError', 'TimeoutError'):
+                    # Server errors on Google's side — we should retry
+                    transient_tokens.append(group_tokens[idx])
+                    logger.warning(
+                        "[notify] Transient FCM server error (idx=%d): %s",
+                        idx, resp.exception,
+                    )
+                else:
+                    # Auth errors, Quota errors, etc. Systemic token issues — delete them as well
+                    fatal_failures += 1
+                    invalid_tokens.append(group_tokens[idx])
+                    logger.error(
+                        "[notify] Fatal configuration/auth FCM error (idx=%d): [%s] %s. Token scheduled for deletion.",
+                        idx, err_name, resp.exception,
+                    )
+
+        if invalid_tokens:
+            FCMDevice.objects.filter(registration_id__in=invalid_tokens).delete()
+            logger.info(
+                "[notify] Deleted %d invalid FCM tokens.", len(invalid_tokens)
+            )
 
         logger.info(
             "[notify] FCM result: sent=%d failed=%d (token_errors=%d transient=%d fatal=%d) task=%s",
-            response.success_count,
-            response.failure_count,
+            success_count,
+            failure_count,
             len(invalid_tokens),
             len(transient_tokens),
             fatal_failures,
@@ -281,8 +317,8 @@ def _process_notification_batch(
             )
 
         return (
-            f"Batch Processed: {response.success_count} sent, "
-            f"{response.failure_count} failed "
+            f"Batch Processed: {success_count} sent, "
+            f"{failure_count} failed "
             f"({len(invalid_tokens)} bad tokens removed, {fatal_failures} fatal errors)."
         )
 
