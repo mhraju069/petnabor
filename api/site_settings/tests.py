@@ -20,7 +20,7 @@ class SeedDemoContentTest(TestCase):
             email="me@test.com", username="me", phone="10000401", password="pass", is_verified=True
         )
 
-        call_command("seed_demo_content", no_images=True, befriend="me@test.com", stdout=StringIO())
+        call_command("seed_demo_content", no_images=True, befriend=["me@test.com"], stdout=StringIO())
 
         demo = User.objects.filter(email__endswith="@demo.petnabor.app")
         self.assertGreaterEqual(demo.count(), 10)
@@ -32,6 +32,16 @@ class SeedDemoContentTest(TestCase):
         self.assertTrue(PostLike.objects.exists())
         self.assertTrue(Story.objects.filter(author__in=demo).exists())
         self.assertEqual(Friendship.objects.filter(receiver=me).count(), demo.count())
+
+        # On existing demo data, --befriend only adds friendships (several emails ok).
+        other = User.objects.create_user(
+            email="other@test.com", username="other", phone="10000402", password="pass", is_verified=True
+        )
+        call_command(
+            "seed_demo_content", befriend=["other@test.com,me@test.com"], stdout=StringIO()
+        )
+        self.assertEqual(Friendship.objects.filter(receiver=other).count(), demo.count())
+        self.assertEqual(Friendship.objects.filter(receiver=me).count(), demo.count())  # no duplicates
 
         # Running again without --reset refuses instead of duplicating.
         from django.core.management.base import CommandError

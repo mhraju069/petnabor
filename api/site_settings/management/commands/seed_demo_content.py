@@ -5,7 +5,9 @@ friendships and a few stories — all placed around a location you choose so
 they show up on the map, in "Pet sitters near you" and in the feed.
 
     python manage.py seed_demo_content --lat 40.7128 --lng -74.0060 --city "New York" --state NY
-    python manage.py seed_demo_content --befriend you@example.com   # also friends with your account
+    python manage.py seed_demo_content --befriend you@example.com,teammate@example.com
+        # also friends with these accounts (comma-separated or repeat the flag);
+        # on an existing demo dataset this only adds the friendships
     python manage.py seed_demo_content --reset                      # remove all demo content first
 
 Demo accounts use emails ending in @demo.petnabor.app and have no usable
@@ -199,7 +201,13 @@ class Command(BaseCommand):
         parser.add_argument("--radius-km", type=float, default=4.0)
         parser.add_argument("--city", default="New York")
         parser.add_argument("--state", default="NY")
-        parser.add_argument("--befriend", help="Email of an existing account to befriend all demo users")
+        parser.add_argument(
+            "--befriend",
+            action="append",
+            default=[],
+            help="Email(s) of existing accounts to befriend all demo users. "
+            "Comma-separated or repeat the flag.",
+        )
         parser.add_argument("--reset", action="store_true", help="Delete existing demo content first")
         parser.add_argument("--no-images", action="store_true", help="Skip photo downloads")
         parser.add_argument("--stories-only", action="store_true", help="Only (re)create today's stories")
@@ -234,11 +242,19 @@ class Command(BaseCommand):
             self._stories(users, use_images)
             return
 
-        if User.objects.filter(email__endswith=f"@{DEMO_DOMAIN}").exists():
+        befriend = [e.strip() for value in o["befriend"] for e in value.split(",") if e.strip()]
+
+        existing = list(User.objects.filter(email__endswith=f"@{DEMO_DOMAIN}"))
+        if existing:
+            if befriend:
+                # Demo data is already there: just add the friendships.
+                self._befriend(existing, befriend)
+                return
             raise CommandError("Demo content already exists. Use --reset to recreate it.")
 
         users, pets_by_user = self._users_and_pets(o, use_images)
-        self._friendships(users, o.get("befriend"))
+        self._friendships(users)
+        self._befriend(users, befriend)
         posts = self._posts(users, pets_by_user, use_images)
         self._engagement(users, posts)
         self._stories(users, use_images)
@@ -309,7 +325,7 @@ class Command(BaseCommand):
             pets_by_user[user.id] = user_pets
         return users, pets_by_user
 
-    def _friendships(self, users, befriend_email):
+    def _friendships(self, users):
         from api.friends.models import Friendship
 
         # A loose neighborhood network: everyone knows a few people.
@@ -317,14 +333,30 @@ class Command(BaseCommand):
             for other in random.sample(users[i + 1:], k=min(4, len(users[i + 1:]))):
                 Friendship.objects.get_or_create(sender=user, receiver=other)
 
-        if befriend_email:
-            me = User.objects.filter(email__iexact=befriend_email).first()
+    def _befriend(self, users, emails):
+        """Make every demo user a friend of each real account in `emails`."""
+        from django.db.models import Q
+
+        from api.friends.models import Friendship
+        from api.messaging.services import invalidate_messaging_permission
+
+        for email in emails:
+            me = User.objects.filter(email__iexact=email).first()
             if not me:
-                self.stdout.write(self.style.WARNING(f"No account with email {befriend_email}; skipped befriending."))
-                return
+                self.stdout.write(self.style.WARNING(f"No account with email {email}; skipped."))
+                continue
+            added = 0
             for user in users:
-                Friendship.objects.get_or_create(sender=user, receiver=me)
-            self.stdout.write(self.style.SUCCESS(f"All demo users are now friends with {befriend_email}."))
+                # A friendship is one row in either direction.
+                if not Friendship.objects.filter(
+                    Q(sender=user, receiver=me) | Q(sender=me, receiver=user)
+                ).exists():
+                    Friendship.objects.create(sender=user, receiver=me)
+                    invalidate_messaging_permission(user.id, me.id)
+                    added += 1
+            self.stdout.write(self.style.SUCCESS(
+                f"{email}: {added} new demo friend(s) ({len(users)} total)."
+            ))
 
     def _posts(self, users, pets_by_user, use_images):
         from api.post.models import MediaTypeChoices, Post, PostMedia
