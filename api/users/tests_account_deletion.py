@@ -83,3 +83,74 @@ class AccountDeletionTest(TestCase):
         response = self.client.delete(self.url)
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertTrue(User.objects.filter(id=self.user.id).exists())
+
+
+@mock.patch("api.tip.services.get_full_balance_summary", return_value=NO_MONEY)
+class WebAccountDeletionTest(TestCase):
+    """The public delete-account page (works without the app)."""
+
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()  # rate-limit counters
+        self.user = User.objects.create_user(
+            email="webleaver@test.com", username="webleaver", phone="10000097",
+            password="pass", is_verified=True,
+        )
+        self.url = reverse("web-delete-account")
+
+    def _link_for(self, email, mock_send):
+        response = self.client.post(self.url, {"email": email})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Check your email")
+        if not mock_send.called:
+            return None
+        html = mock_send.call_args.args[1]
+        start = html.index("/delete-account/confirm/?token=")
+        return html[start:html.index('"', start)]
+
+    @mock.patch("api.users.web_account_deletion.EmailService.send_html_email")
+    def test_full_flow_deletes_account(self, mock_send, _balance):
+        link = self._link_for("WebLeaver@test.com", mock_send)
+        self.assertIsNotNone(link)
+        self.assertEqual(mock_send.call_args.args[2], ["webleaver@test.com"])
+
+        # Opening the link only asks for confirmation (mail scanners open links).
+        response = self.client.get(link)
+        self.assertContains(response, "Yes, delete my account")
+        self.assertTrue(User.objects.filter(pk=self.user.pk).exists())
+
+        token = link.split("token=", 1)[1]
+        response = self.client.post(reverse("web-delete-account-confirm"), {"token": token})
+        self.assertContains(response, "Your account has been deleted")
+        self.assertFalse(User.objects.filter(pk=self.user.pk).exists())
+
+        # The link can't be used again.
+        response = self.client.get(link)
+        self.assertContains(response, "This link doesn")
+
+    @mock.patch("api.users.web_account_deletion.EmailService.send_html_email")
+    def test_unknown_email_gets_same_answer_and_no_email(self, mock_send, _balance):
+        self.assertIsNone(self._link_for("nobody@test.com", mock_send))
+        mock_send.assert_not_called()
+
+    @mock.patch("api.users.web_account_deletion.EmailService.send_html_email")
+    def test_staff_accounts_cannot_be_deleted_here(self, mock_send, _balance):
+        self.user.is_staff = True
+        self.user.save()
+        self.assertIsNone(self._link_for("webleaver@test.com", mock_send))
+
+    def test_tampered_token_is_rejected(self, _balance):
+        response = self.client.get(reverse("web-delete-account-confirm") + "?token=abc")
+        self.assertContains(response, "This link doesn")
+        response = self.client.post(reverse("web-delete-account-confirm"), {"token": "abc"})
+        self.assertContains(response, "This link doesn")
+        self.assertTrue(User.objects.filter(pk=self.user.pk).exists())
+
+    @mock.patch("api.users.web_account_deletion.EmailService.send_html_email")
+    def test_requests_are_rate_limited(self, mock_send, _balance):
+        for _ in range(5):
+            self.client.post(self.url, {"email": "webleaver@test.com"})
+        response = self.client.post(self.url, {"email": "webleaver@test.com"})
+        self.assertContains(response, "Too many requests")
+        self.assertEqual(mock_send.call_count, 5)

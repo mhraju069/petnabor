@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Delete your PetNabor account</title>
+  <style>
+    :root { --text:#1F2933; --muted:#5B6670; --bg:#EAF4FB; --card:#fff; --accent:#E05A1B; --line:#E3EAF1; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text);
+           font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; }
+    main { max-width:640px; margin:0 auto; padding:32px 16px 48px; }
+    .card { background:var(--card); border-radius:16px; padding:28px 24px; box-shadow:0 2px 12px rgba(20,40,60,.06); }
+    .brand { font-weight:700; font-size:20px; margin-bottom:20px; }
+    .brand span { color:var(--accent); }
+    h1 { font-size:24px; margin:0 0 8px; }
+    h2 { font-size:17px; margin:28px 0 8px; }
+    p, li { color:var(--text); }
+    .muted { color:var(--muted); font-size:14px; }
+    ol, ul { padding-left:20px; margin:8px 0; }
+    li { margin:4px 0; }
+    form { margin-top:16px; }
+    label { display:block; font-weight:600; margin-bottom:6px; }
+    input[type=email] { width:100%; padding:12px 14px; font-size:16px; border:1px solid var(--line);
+                        border-radius:10px; }
+    button { margin-top:14px; width:100%; padding:13px; font-size:16px; font-weight:700; color:#fff;
+             background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
+    .error { background:#FDECEE; color:#9B1C1C; padding:10px 12px; border-radius:10px; margin-top:12px; }
+    .notice { background:#EAF7F0; padding:12px 14px; border-radius:10px; }
+    hr { border:0; border-top:1px solid var(--line); margin:28px 0; }
+    a { color:var(--accent); }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div class="brand">Pet<span>Nabor</span></div>
+
+    {% if step == "request" %}
+      <h1>Delete your PetNabor account</h1>
+      <p>You can permanently delete your PetNabor account and its data, from the app or from this page.</p>
+
+      <h2>In the app</h2>
+      <ol>
+        <li>Open PetNabor and sign in.</li>
+        <li>Go to <b>Settings</b>.</li>
+        <li>Tap <b>Delete account</b> and confirm.</li>
+      </ol>
+
+      <h2>On this page</h2>
+      <p>Enter the email address of your account. We'll email you a link to confirm.</p>
+      <form method="post" action="">
+        {% csrf_token %}
+        <label for="email">Account email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <button type="submit">Email me a deletion link</button>
+      </form>
+
+      <hr>
+      <h2>What is deleted</h2>
+      <ul>
+        <li>Your account, profile and sign-in (including Google or Apple sign-in)</li>
+        <li>Your pets, posts, stories, comments, likes and photos</li>
+        <li>Your friends list, meetings, notifications and saved location</li>
+      </ul>
+      <h2>What is kept</h2>
+      <ul>
+        <li>Tips you sent or received are kept as payment records, without your name or account.</li>
+        <li>Chat messages you already sent stay visible to the people you sent them to, without your name or profile.</li>
+      </ul>
+      <p class="muted">Deletion is immediate and can't be undone. If you still have a tip balance or a payout in
+        progress, please withdraw it in the app first.</p>
+      <p class="muted">Questions? Email <a href="mailto:support@petneighborbrands.com">support@petneighborbrands.com</a>.</p>
+
+    {% elif step == "sent" %}
+      <h1>Check your email</h1>
+      <p class="notice">If <b>{{ email }}</b> belongs to a PetNabor account, we've sent it a link to delete the account.
+        The link works for 24 hours.</p>
+      <p class="muted">Nothing arrived? Check your spam folder, or email
+        <a href="mailto:support@petneighborbrands.com">support@petneighborbrands.com</a> from that address.</p>
+
+    {% elif step == "confirm" %}
+      <h1>Delete this account?</h1>
+      <p>This permanently deletes the PetNabor account <b>{{ email }}</b>: your profile, pets, posts, stories,
+        photos, friends and meetings. This can't be undone.</p>
+      <form method="post" action="">
+        {% csrf_token %}
+        <input type="hidden" name="token" value="{{ token }}">
+        <button type="submit">Yes, delete my account</button>
+      </form>
+
+    {% elif step == "done" %}
+      <h1>Your account has been deleted</h1>
+      <p>Your PetNabor account and its data have been deleted. Thanks for being part of the pack. 🐾</p>
+
+    {% elif step == "blocked" %}
+      <h1>We can't delete the account yet</h1>
+      <p class="error">{{ reason }}</p>
+      <p class="muted">Once that's done, request a new link on <a href="{% url 'web-delete-account' %}">this page</a>.</p>
+
+    {% elif step == "invalid" %}
+      <h1>This link doesn't work</h1>
+      <p>It may have expired (links last 24 hours), been used already, or the account no longer exists.</p>
+      <p><a href="{% url 'web-delete-account' %}">Request a new link</a></p>
+
+    {% else %}
+      <h1>Something went wrong</h1>
+      <p>Your account was not deleted. Please try again later, or email
+        <a href="mailto:support@petneighborbrands.com">support@petneighborbrands.com</a>.</p>
+    {% endif %}
+  </div>
+</main>
+</body>
+</html>

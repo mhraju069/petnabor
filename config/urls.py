@@ -11,9 +11,18 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from api.users import web_account_deletion
+
 urlpatterns = [
     path(settings.ADMIN_URL, admin.site.urls),
     path("api/", include("api.urls")),
+    # Public "delete your account" page (Google Play data-safety link).
+    path("delete-account/", web_account_deletion.request_deletion, name="web-delete-account"),
+    path(
+        "delete-account/confirm/",
+        web_account_deletion.confirm_deletion,
+        name="web-delete-account-confirm",
+    ),
     # OpenAPI Schema Generation
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/swagger/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
