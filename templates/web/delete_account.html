@@ -1,116 +1,190 @@
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#3E77BC">
   <title>Delete your PetNabor account</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'web/favicon-32.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'web/icon-192.png' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600&display=swap" rel="stylesheet">
   <style>
-    :root { --text:#1F2933; --muted:#5B6670; --bg:#EAF4FB; --card:#fff; --accent:#E05A1B; --line:#E3EAF1; }
-    * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg); color:var(--text);
-           font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; }
-    main { max-width:640px; margin:0 auto; padding:32px 16px 48px; }
-    .card { background:var(--card); border-radius:16px; padding:28px 24px; box-shadow:0 2px 12px rgba(20,40,60,.06); }
-    .brand { font-weight:700; font-size:20px; margin-bottom:20px; }
-    .brand span { color:var(--accent); }
-    h1 { font-size:24px; margin:0 0 8px; }
-    h2 { font-size:17px; margin:28px 0 8px; }
-    p, li { color:var(--text); }
-    .muted { color:var(--muted); font-size:14px; }
-    ol, ul { padding-left:20px; margin:8px 0; }
-    li { margin:4px 0; }
-    form { margin-top:16px; }
-    label { display:block; font-weight:600; margin-bottom:6px; }
-    input[type=email] { width:100%; padding:12px 14px; font-size:16px; border:1px solid var(--line);
-                        border-radius:10px; }
-    button { margin-top:14px; width:100%; padding:13px; font-size:16px; font-weight:700; color:#fff;
-             background:var(--accent); border:0; border-radius:10px; cursor:pointer; }
-    .error { background:#FDECEE; color:#9B1C1C; padding:10px 12px; border-radius:10px; margin-top:12px; }
-    .notice { background:#EAF7F0; padding:12px 14px; border-radius:10px; }
-    hr { border:0; border-top:1px solid var(--line); margin:28px 0; }
-    a { color:var(--accent); }
+    /* App theme (constants/colors.ts) */
+    :root {
+      --primary: #3E77BC;
+      --secondary: #53BE95;
+      --text: #212121;
+      --label: #4E6184;
+      --input-bg: #F6F6F6;
+      --border: #E8E6F8;
+      --danger: #D0021B;
+      --warning: #F5A623;
+      --page: #F3F7FC;
+      --tint: #EEF4FB;
+      --gradient: linear-gradient(90deg, #3E77BC 0%, #53BE95 100%);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--page); color: var(--text);
+      font: 400 16px/1.55 "Fredoka", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    .band { height: 6px; background: var(--gradient); }
+    main { max-width: 600px; margin: 0 auto; padding: 24px 16px 48px; }
+    header { display: flex; justify-content: center; padding: 8px 0 20px; }
+    header img { height: 56px; width: auto; }
+    .card {
+      background: #fff; border-radius: 24px; padding: 28px 22px;
+      box-shadow: 0 6px 24px rgba(62, 119, 188, .08); border: 1px solid #EEF1F5;
+    }
+    .hero { display: block; margin: 0 auto 18px; max-width: 100%; height: auto; }
+    .hero.lg { width: 220px; }
+    .hero.md { width: 130px; }
+    .hero.wide { width: 100%; max-width: 420px; }
+    h1 { font-weight: 600; font-size: 26px; line-height: 1.25; margin: 0 0 8px; text-align: center; }
+    .lead { text-align: center; color: var(--label); margin: 0 0 8px; }
+    h2 { font-weight: 600; font-size: 18px; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
+    h2 .num {
+      flex: none; width: 28px; height: 28px; border-radius: 10px; background: var(--tint); color: var(--primary);
+      display: inline-flex; align-items: center; justify-content: center; font-size: 15px;
+    }
+    .section { margin-top: 26px; }
+    .steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+    .steps li {
+      background: var(--input-bg); border-radius: 14px; padding: 10px 14px; display: flex; gap: 10px; align-items: center;
+    }
+    .steps li b { font-weight: 500; color: var(--primary); }
+    .paw { color: var(--secondary); flex: none; }
+    p, li { margin: 6px 0; }
+    .muted { color: var(--label); font-size: 14px; }
+    label { display: block; font-weight: 500; color: var(--label); margin: 4px 0 6px; font-size: 15px; }
+    input[type=email] {
+      width: 100%; padding: 14px 16px; font: inherit; color: var(--text); background: var(--input-bg);
+      border: 1.5px solid transparent; border-radius: 14px; outline: none; transition: border-color .15s;
+    }
+    input[type=email]:focus { border-color: var(--primary); background: #fff; }
+    .btn {
+      display: block; width: 100%; margin-top: 14px; padding: 14px; font: 500 17px "Fredoka", sans-serif;
+      color: #fff; background: var(--primary); border: 0; border-radius: 999px; cursor: pointer;
+      text-align: center; text-decoration: none; box-shadow: 0 6px 16px rgba(62, 119, 188, .25);
+    }
+    .btn:hover { filter: brightness(1.05); }
+    .btn.danger { background: var(--danger); box-shadow: 0 6px 16px rgba(208, 2, 27, .22); }
+    .btn.ghost { background: var(--tint); color: var(--primary); box-shadow: none; }
+    .error { background: #FDECEE; color: #9B1C1C; padding: 10px 14px; border-radius: 14px; margin-top: 12px; }
+    .notice { background: #E8F7F1; color: #1E6B50; padding: 12px 14px; border-radius: 14px; text-align: center; }
+    .split { display: grid; gap: 12px; grid-template-columns: 1fr; margin-top: 26px; }
+    @media (min-width: 520px) { .split { grid-template-columns: 1fr 1fr; } }
+    .box { border-radius: 18px; padding: 14px 16px; }
+    .box h3 { font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+    .box ul { margin: 0; padding-left: 18px; font-size: 15px; }
+    .box.deleted { background: #FDF2F3; } .box.deleted h3 { color: var(--danger); }
+    .box.kept { background: var(--tint); } .box.kept h3 { color: var(--primary); }
+    a { color: var(--primary); font-weight: 500; }
+    footer { text-align: center; margin-top: 22px; font-size: 14px; color: var(--label); }
   </style>
 </head>
 <body>
+<div class="band"></div>
 <main>
+  <header><img src="{% static 'web/logo.png' %}" alt="PetNabor — Better together" width="126" height="56"></header>
+
   <div class="card">
-    <div class="brand">Pet<span>Nabor</span></div>
-
     {% if step == "request" %}
+      <img class="hero lg" src="{% static 'web/illus-4.png' %}" alt="" width="220" height="184">
       <h1>Delete your PetNabor account</h1>
-      <p>You can permanently delete your PetNabor account and its data, from the app or from this page.</p>
+      <p class="lead">You can permanently delete your account and its data, in the app or right here.</p>
 
-      <h2>In the app</h2>
-      <ol>
-        <li>Open PetNabor and sign in.</li>
-        <li>Go to <b>Settings</b>.</li>
-        <li>Tap <b>Delete account</b> and confirm.</li>
-      </ol>
+      <div class="section">
+        <h2><span class="num">1</span>In the app</h2>
+        <ol class="steps">
+          <li><svg class="paw" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><ellipse cx="6" cy="9" rx="2.2" ry="2.8"/><ellipse cx="10" cy="5.5" rx="2.2" ry="2.8"/><ellipse cx="14.5" cy="5.5" rx="2.2" ry="2.8"/><ellipse cx="18.3" cy="9" rx="2.2" ry="2.8"/><path d="M12.2 11c-2.6 0-6.2 4.3-6.2 6.8 0 1.7 1.3 2.6 2.9 2.6 1.4 0 2.2-.8 3.3-.8s1.9.8 3.3.8c1.6 0 2.9-.9 2.9-2.6 0-2.5-3.6-6.8-6.2-6.8z"/></g></svg><span>Open PetNabor and sign in</span></li>
+          <li><svg class="paw" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><ellipse cx="6" cy="9" rx="2.2" ry="2.8"/><ellipse cx="10" cy="5.5" rx="2.2" ry="2.8"/><ellipse cx="14.5" cy="5.5" rx="2.2" ry="2.8"/><ellipse cx="18.3" cy="9" rx="2.2" ry="2.8"/><path d="M12.2 11c-2.6 0-6.2 4.3-6.2 6.8 0 1.7 1.3 2.6 2.9 2.6 1.4 0 2.2-.8 3.3-.8s1.9.8 3.3.8c1.6 0 2.9-.9 2.9-2.6 0-2.5-3.6-6.8-6.2-6.8z"/></g></svg><span>Go to <b>Settings</b></span></li>
+          <li><svg class="paw" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><ellipse cx="6" cy="9" rx="2.2" ry="2.8"/><ellipse cx="10" cy="5.5" rx="2.2" ry="2.8"/><ellipse cx="14.5" cy="5.5" rx="2.2" ry="2.8"/><ellipse cx="18.3" cy="9" rx="2.2" ry="2.8"/><path d="M12.2 11c-2.6 0-6.2 4.3-6.2 6.8 0 1.7 1.3 2.6 2.9 2.6 1.4 0 2.2-.8 3.3-.8s1.9.8 3.3.8c1.6 0 2.9-.9 2.9-2.6 0-2.5-3.6-6.8-6.2-6.8z"/></g></svg><span>Tap <b>Delete account</b> and confirm</span></li>
+        </ol>
+      </div>
 
-      <h2>On this page</h2>
-      <p>Enter the email address of your account. We'll email you a link to confirm.</p>
-      <form method="post" action="">
-        {% csrf_token %}
-        <label for="email">Account email</label>
-        <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
-        {% if error %}<div class="error">{{ error }}</div>{% endif %}
-        <button type="submit">Email me a deletion link</button>
-      </form>
+      <div class="section">
+        <h2><span class="num">2</span>On this page</h2>
+        <p class="muted">Enter your account's email address and we'll send you a link to confirm.</p>
+        <form method="post" action="">
+          {% csrf_token %}
+          <label for="email">Account email</label>
+          <input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+          {% if error %}<div class="error">{{ error }}</div>{% endif %}
+          <button class="btn" type="submit">Email me a deletion link</button>
+        </form>
+      </div>
 
-      <hr>
-      <h2>What is deleted</h2>
-      <ul>
-        <li>Your account, profile and sign-in (including Google or Apple sign-in)</li>
-        <li>Your pets, posts, stories, comments, likes and photos</li>
-        <li>Your friends list, meetings, notifications and saved location</li>
-      </ul>
-      <h2>What is kept</h2>
-      <ul>
-        <li>Tips you sent or received are kept as payment records, without your name or account.</li>
-        <li>Chat messages you already sent stay visible to the people you sent them to, without your name or profile.</li>
-      </ul>
-      <p class="muted">Deletion is immediate and can't be undone. If you still have a tip balance or a payout in
-        progress, please withdraw it in the app first.</p>
-      <p class="muted">Questions? Email <a href="mailto:support@petneighborbrands.com">support@petneighborbrands.com</a>.</p>
+      <div class="split">
+        <div class="box deleted">
+          <h3>What is deleted</h3>
+          <ul>
+            <li>Your account, profile and sign-in (including Google or Apple)</li>
+            <li>Your pets, posts, stories, comments, likes and photos</li>
+            <li>Your friends, meetings, notifications and saved location</li>
+          </ul>
+        </div>
+        <div class="box kept">
+          <h3>What is kept</h3>
+          <ul>
+            <li>Tips you sent or received, as payment records without your name or account</li>
+            <li>Chat messages you already sent, without your name or profile</li>
+          </ul>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:16px">Deletion is immediate and can't be undone. If you still have a tip balance
+        or a payout in progress, please withdraw it in the app first.</p>
 
     {% elif step == "sent" %}
+      <img class="hero md" src="{% static 'web/illus-mail.png' %}" alt="" width="130" height="118">
       <h1>Check your email</h1>
       <p class="notice">If <b>{{ email }}</b> belongs to a PetNabor account, we've sent it a link to delete the account.
         The link works for 24 hours.</p>
-      <p class="muted">Nothing arrived? Check your spam folder, or email
+      <p class="muted" style="text-align:center">Nothing arrived? Check your spam folder, or email
         <a href="mailto:support@petneighborbrands.com">support@petneighborbrands.com</a> from that address.</p>
 
     {% elif step == "confirm" %}
+      <img class="hero lg" src="{% static 'web/illus-4.png' %}" alt="" width="220" height="184">
       <h1>Delete this account?</h1>
-      <p>This permanently deletes the PetNabor account <b>{{ email }}</b>: your profile, pets, posts, stories,
-        photos, friends and meetings. This can't be undone.</p>
+      <p class="lead">This permanently deletes <b>{{ email }}</b>: your profile, pets, posts, stories, photos, friends
+        and meetings. This can't be undone.</p>
       <form method="post" action="">
         {% csrf_token %}
         <input type="hidden" name="token" value="{{ token }}">
-        <button type="submit">Yes, delete my account</button>
+        <button class="btn danger" type="submit">Yes, delete my account</button>
       </form>
 
     {% elif step == "done" %}
+      <img class="hero wide" src="{% static 'web/illus-1.png' %}" alt="" width="420" height="215">
       <h1>Your account has been deleted</h1>
-      <p>Your PetNabor account and its data have been deleted. Thanks for being part of the pack. 🐾</p>
+      <p class="lead">Your PetNabor account and its data are gone. Thanks for being part of the pack. <svg class="paw" style="vertical-align:-3px" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><ellipse cx="6" cy="9" rx="2.2" ry="2.8"/><ellipse cx="10" cy="5.5" rx="2.2" ry="2.8"/><ellipse cx="14.5" cy="5.5" rx="2.2" ry="2.8"/><ellipse cx="18.3" cy="9" rx="2.2" ry="2.8"/><path d="M12.2 11c-2.6 0-6.2 4.3-6.2 6.8 0 1.7 1.3 2.6 2.9 2.6 1.4 0 2.2-.8 3.3-.8s1.9.8 3.3.8c1.6 0 2.9-.9 2.9-2.6 0-2.5-3.6-6.8-6.2-6.8z"/></g></svg></p>
 
     {% elif step == "blocked" %}
       <h1>We can't delete the account yet</h1>
       <p class="error">{{ reason }}</p>
-      <p class="muted">Once that's done, request a new link on <a href="{% url 'web-delete-account' %}">this page</a>.</p>
+      <p class="muted" style="text-align:center">Once that's done, request a new link.</p>
+      <a class="btn ghost" href="{% url 'web-delete-account' %}">Back to the start</a>
 
     {% elif step == "invalid" %}
+      <img class="hero md" src="{% static 'web/illus-mail.png' %}" alt="" width="130" height="118">
       <h1>This link doesn't work</h1>
-      <p>It may have expired (links last 24 hours), been used already, or the account no longer exists.</p>
-      <p><a href="{% url 'web-delete-account' %}">Request a new link</a></p>
+      <p class="lead">It may have expired (links last 24 hours), been used already, or the account no longer exists.</p>
+      <a class="btn" href="{% url 'web-delete-account' %}">Request a new link</a>
 
     {% else %}
       <h1>Something went wrong</h1>
-      <p>Your account was not deleted. Please try again later, or email
+      <p class="lead">Your account was not deleted. Please try again later, or email
         <a href="mailto:support@petneighborbrands.com">support@petneighborbrands.com</a>.</p>
     {% endif %}
   </div>
+
+  <footer>
+    Questions? <a href="mailto:support@petneighborbrands.com">support@petneighborbrands.com</a>
+    · <a href="https://www.petnabor.com/privacy-policy/">Privacy policy</a>
+  </footer>
 </main>
 </body>
 </html>
