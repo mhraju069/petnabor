@@ -367,3 +367,40 @@ class PostDeleteRemovesMediaTest(PostBaseTestCase):
         response = self.client.delete(reverse("post-detail", kwargs={"pk": post.id}))
         self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
         self.assertEqual(PostMedia.objects.filter(post=post).count(), 1)
+
+
+class FeedNewCountTest(PostBaseTestCase):
+    """Explore tab badge: posts by others since the last visit."""
+
+    def test_counts_only_new_posts_by_others(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        url = reverse('post-feed-new-count')
+        self.client.force_authenticate(self.alice)
+
+        # First visit: nothing to compare against, but we get a start time.
+        first = self.client.get(url)
+        self.assertEqual(first.data['count'], 0)
+        since = first.data['now']
+
+        old = Post.objects.create(author=self.bob, content_text="old", privacy=PrivacyChoices.PUBLIC)
+        Post.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=1))
+        Post.objects.create(author=self.bob, content_text="new", privacy=PrivacyChoices.PUBLIC)
+        Post.objects.create(author=self.bob, content_text="friends", privacy=PrivacyChoices.FRIENDS_ONLY)
+        Post.objects.create(author=self.alice, content_text="mine", privacy=PrivacyChoices.PUBLIC)
+
+        response = self.client.get(url, {"since": since})
+        # Bob's new public post only: not the old one, not the friends-only
+        # one (not friends), not Alice's own.
+        self.assertEqual(response.data['count'], 1)
+
+        self.make_friends(self.alice, self.bob)
+        self.assertEqual(self.client.get(url, {"since": since}).data['count'], 2)
+
+    def test_bad_since_is_treated_as_first_visit(self):
+        self.client.force_authenticate(self.alice)
+        response = self.client.get(reverse('post-feed-new-count'), {"since": "2026-13-45T00:00:00Z"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 0)

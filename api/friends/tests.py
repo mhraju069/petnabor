@@ -366,3 +366,54 @@ class FriendsAPITestCase(TestCase):
         self.assertEqual(results[1]['username'], 'user5')
         self.assertEqual(results[1]['mutual_friends_count'], 0)
 
+
+
+class NewNearbyCountTest(TestCase):
+    """Pet Sitters tab badge: sitters who joined near me since my last visit."""
+
+    def _user(self, name, user_type, point):
+        from api.users.models import Profile
+
+        user = User.objects.create_user(
+            email=f"{name}@test.com", username=name, password="pass",
+            is_verified=True, user_type=user_type,
+        )
+        Profile.objects.update_or_create(user=user, defaults={"location_point": point})
+        return user
+
+    def test_counts_new_nearby_sitters_only(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        me = self._user("parent", "petparent", Point(0.0, 0.0))
+        self.client = APIClient()
+        self.client.force_authenticate(me)
+        url = reverse("nearby-new-count")
+
+        first = self.client.get(url, {"type": "petsitter"})
+        self.assertEqual(first.data["count"], 0)
+        since = first.data["now"]
+
+        old = self._user("oldsitter", "petsitter", Point(0.0, 0.0))
+        User.objects.filter(pk=old.pk).update(date_joined=timezone.now() - timedelta(days=3))
+        self._user("newsitter", "petsitter", Point(0.0, 0.0))
+        self._user("newparent", "petparent", Point(0.0, 0.0))
+        self._user("farsitter", "petsitter", Point(10.0, 10.0))  # ~1,500 km away
+
+        response = self.client.get(url, {"type": "petsitter", "since": since})
+        self.assertEqual(response.data["count"], 1)
+
+    def test_zero_without_a_location(self):
+        from api.users.models import Profile
+
+        me = User.objects.create_user(
+            email="noloc@test.com", username="noloc", password="pass", is_verified=True,
+        )
+        Profile.objects.get_or_create(user=me)
+        self.client = APIClient()
+        self.client.force_authenticate(me)
+        response = self.client.get(
+            reverse("nearby-new-count"), {"type": "petsitter", "since": "2020-01-01T00:00:00Z"}
+        )
+        self.assertEqual(response.data["count"], 0)

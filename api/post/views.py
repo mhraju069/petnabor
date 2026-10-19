@@ -242,6 +242,41 @@ class PostViewSet(viewsets.ModelViewSet):
         serializer = PostListSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data)
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="since",
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
+                description="The `now` from the previous call (when the user last opened Explore).",
+                required=False,
+            ),
+        ],
+        responses=inline_serializer(
+            name="NewCountResponse",
+            fields={"count": serializers.IntegerField(), "now": serializers.DateTimeField()},
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="feed/new-count")
+    def feed_new_count(self, request):
+        """
+        GET /post/posts/feed/new-count/?since=… — feed posts by others since
+        then (the Explore tab badge). No `since`: 0, plus `now` to start from.
+        """
+        from api.core.new_counts import badge_response_data, capped_count, parse_since
+
+        since = parse_since(request)
+        count = 0
+        if since is not None:
+            qs = (
+                FeedService.get_feed(request.user)
+                .filter(created_at__gt=since)
+                .exclude(author=request.user)
+                .order_by()
+            )
+            count = capped_count(qs)
+        return Response(badge_response_data(count))
+
     # ── Like ──────────────────────────────────────────────────────────
 
     @extend_schema(

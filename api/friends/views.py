@@ -386,6 +386,47 @@ class FriendListView(generics.ListAPIView):
         return queryset
 
 
+class NewNearbyCountView(views.APIView):
+    """
+    GET /friends/nearby/new-count/?type=petsitter&radius=<km>&since=…
+
+    People of that role who joined within the radius since `since` (the
+    Pet Sitters tab badge). 0 without `since` or without a saved location.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name="type", type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name="radius", type=OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=False,
+                             description="Kilometres (default 8.05 = 5 miles)."),
+            OpenApiParameter(name="since", type=OpenApiTypes.DATETIME, location=OpenApiParameter.QUERY, required=False),
+        ],
+        responses=inline_serializer(
+            name="NewNearbyCountResponse",
+            fields={"count": serializers.IntegerField(), "now": serializers.DateTimeField()},
+        ),
+    )
+    def get(self, request):
+        from api.core.new_counts import badge_response_data, capped_count, parse_since
+
+        since = parse_since(request)
+        profile = getattr(request.user, "profile", None)
+        if since is None or not getattr(profile, "location_point", None):
+            return Response(badge_response_data(0))
+
+        user_filter = UserFilter(request)
+        radius = user_filter.get_radius() if request.query_params.get("radius") else 8.05
+        qs = services.get_nearby_users(
+            request.user,
+            user_type=user_filter.get_user_type() or "petsitter",
+            # No "everywhere" for a "near me" badge.
+            radius=radius or 8.05,
+        ).filter(date_joined__gt=since).order_by()
+        return Response(badge_response_data(capped_count(qs)))
+
+
 class UserSearchView(views.APIView):
     permission_classes = [IsAuthenticated]
 
