@@ -158,7 +158,9 @@ class StoryFeedService:
             flat_blocked.update(pair)
         flat_blocked.discard(user.id)  # never exclude self
 
-        # Friend IDs (for FRIENDS_ONLY access)
+        # Friends + self: the feed (stories row) only shows people you're
+        # friends with. Strangers' PUBLIC stories stay reachable on their
+        # profile (user stories endpoint), just not in the feed.
         friend_ids: set = {user.id}
         for sender_id, receiver_id in Friendship.objects.filter(
             Q(sender=user) | Q(receiver=user)
@@ -166,25 +168,12 @@ class StoryFeedService:
             friend_ids.add(sender_id)
             friend_ids.add(receiver_id)
 
-        # Base: all active stories, excluding blocked users
-        # Show PUBLIC stories from everyone + FRIENDS_ONLY stories from friends/self
+        # Own and friends' active stories (PUBLIC and FRIENDS_ONLY alike),
+        # minus blocked users.
         qs = (
             StoryService.get_active_queryset()
             .exclude(author_id__in=flat_blocked)
-            .filter(
-                # Own stories (all privacy levels)
-                Q(author=user)
-                |
-                # Friends' stories (PUBLIC + FRIENDS_ONLY)
-                Q(author_id__in=friend_ids)
-                |
-                # Everyone else's PUBLIC stories
-                Q(privacy=StoryPrivacyChoices.PUBLIC)
-            )
-            .exclude(
-                # Exclude FRIENDS_ONLY stories from non-friends (strangers)
-                ~Q(author_id__in=friend_ids) & Q(privacy=StoryPrivacyChoices.FRIENDS_ONLY)
-            )
+            .filter(author_id__in=friend_ids)
         )
 
         return _annotate_story_queryset(qs, user).order_by(

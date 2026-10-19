@@ -148,6 +148,9 @@ class StoryListSerializer(serializers.ModelSerializer):
     author = StoryAuthorSerializer(read_only=True)
     is_viewed = serializers.SerializerMethodField()
     user_reaction = serializers.SerializerMethodField()
+    # Likes, for the author only (they see it next to the view count); null
+    # for everyone else, so feeds don't pay for counts nobody sees.
+    reactions_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Story
@@ -162,6 +165,7 @@ class StoryListSerializer(serializers.ModelSerializer):
             "views_count",
             "is_viewed",
             "user_reaction",
+            "reactions_count",
             "expires_at",
             "created_at",
         ]
@@ -181,6 +185,12 @@ class StoryListSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated:
             return obj.views.filter(viewer=request.user).exists()
         return False
+
+    def get_reactions_count(self, obj) -> int | None:
+        request = self.context.get("request")
+        if request and request.user.is_authenticated and obj.author_id == request.user.id:
+            return obj.reactions.count()
+        return None
 
     def get_user_reaction(self, obj) -> str | None:
         """Returns the requesting user's reaction type, or None."""
@@ -206,7 +216,6 @@ class StoryDetailSerializer(StoryListSerializer):
 
     class Meta(StoryListSerializer.Meta):
         fields = StoryListSerializer.Meta.fields + [
-            "reactions_count",
             "replies_count",
         ]
 

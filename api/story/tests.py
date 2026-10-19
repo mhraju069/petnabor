@@ -122,17 +122,16 @@ class StoryFeedAndListTestCase(StoryBaseTestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-        # Charlie has no friends yet — only PUBLIC stories show (alice + bob each 1 group)
-        # alice has PUBLIC + FRIENDS_ONLY, but charlie is not friend, so only PUBLIC
+        # The feed is friends-only: Charlie has no friends yet, so nothing
+        # shows, not even PUBLIC stories (those stay on each profile).
         data = self.get_data(response)
-        # bob public: 1 group, alice public: 1 group → 2 groups
-        self.assertEqual(len(data), 2)
+        self.assertEqual(len(data), 0)
 
         self.make_friends(self.alice, self.charlie)
         response = self.client.get(url)
         data = self.get_data(response)
-        # Alice is now friend: both alice stories + bob public → still 2 groups
-        self.assertEqual(len(data), 2)
+        # Alice is now a friend: her group shows; Bob (a stranger) still doesn't.
+        self.assertEqual([g['user']['username'] for g in data], ['alice'])
         # Find alice's group
         alice_group = next(g for g in data if g['user']['username'] == 'alice')
         # Alice has 2 stories (PUBLIC + FRIENDS_ONLY) as friends
@@ -146,6 +145,7 @@ class StoryFeedAndListTestCase(StoryBaseTestCase):
         Story.objects.create(author=self.alice, text_content="Story 2", privacy="PUBLIC", expires_at=timezone.now() + timedelta(days=1))
         Story.objects.create(author=self.alice, text_content="Story 3", privacy="PUBLIC", expires_at=timezone.now() + timedelta(days=1))
 
+        self.make_friends(self.alice, self.bob)
         self.client.force_authenticate(self.bob)
         url = reverse('story-feed')
         response = self.client.get(url)
@@ -383,3 +383,32 @@ class StoryCreateIdempotencyTestCase(StoryBaseTestCase):
         response = self.client.post(self.url, self.body, format="json", HTTP_IDEMPOTENCY_KEY="shared")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Story.objects.count(), 2)
+
+
+class StoryFeedPaginationTest(StoryBaseTestCase):
+    """The feed pages by number (20 people per page); the app follows `next`."""
+
+    def test_feed_pages_through_all_friends(self):
+        User = get_user_model()
+        for i in range(25):
+            friend = User.objects.create_user(
+                email=f"f{i}@test.com", username=f"friend{i}", phone=f"2000{i:04d}",
+                password="pass", is_verified=True,
+            )
+            self.make_friends(self.alice, friend)
+            Story.objects.create(
+                author=friend, text_content=f"hi {i}", privacy="PUBLIC",
+                expires_at=timezone.now() + timedelta(days=1),
+            )
+
+        self.client.force_authenticate(self.alice)
+        first = self.client.get(reverse('story-feed'))
+        self.assertEqual(len(first.data['results']), 20)
+        self.assertIn("page=2", first.data['next'])
+
+        second = self.client.get(reverse('story-feed') + "?page=2")
+        self.assertEqual(len(second.data['results']), 5)
+        self.assertIsNone(second.data['next'])
+
+        names = {g['user']['username'] for g in first.data['results'] + second.data['results']}
+        self.assertEqual(len(names), 25)
