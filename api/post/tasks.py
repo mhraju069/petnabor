@@ -190,3 +190,33 @@ def process_post_comment_media_task(self, comment_id: str):
     except Exception as exc:
         logger.exception("Failed to process comment media for %s: %s", comment_id, exc)
         raise self.retry(exc=exc)
+
+
+@shared_task(ignore_result=True)
+def announce_new_post(post_id: str) -> None:
+    """
+    Live "new post" event (api/core/realtime.py): the author's friends right
+    away, and — for public posts — everyone connected, batched. The app then
+    asks /post/posts/feed/new-count/, which applies privacy and blocks.
+    """
+    from django.db.models import Q
+
+    from api.core.realtime import broadcast, notify_users
+    from api.friends.models import Friendship
+
+    from .models import Post, PrivacyChoices
+
+    post = Post.objects.filter(pk=post_id, is_deleted=False).only("author_id", "privacy").first()
+    if post is None or post.privacy == PrivacyChoices.PRIVATE:
+        return
+
+    friend_ids = set()
+    for sender_id, receiver_id in Friendship.objects.filter(
+        Q(sender_id=post.author_id) | Q(receiver_id=post.author_id)
+    ).values_list("sender_id", "receiver_id"):
+        friend_ids.update((sender_id, receiver_id))
+    friend_ids.discard(post.author_id)
+    notify_users(friend_ids, "feed.new_post")
+
+    if post.privacy == PrivacyChoices.PUBLIC:
+        broadcast("feed.new_post")

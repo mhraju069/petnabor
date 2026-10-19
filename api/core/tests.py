@@ -106,3 +106,141 @@ class AutoMediaCloudinaryStorageDeleteTests(TestCase):
         self.assertEqual(destroy.call_args_list[0].kwargs["resource_type"], "raw")
         self.assertEqual(destroy.call_args_list[1].args[0], "media/cloudinary/legacy/abc")
         self.assertEqual(destroy.call_args_list[1].kwargs["resource_type"], "image")
+
+
+class RealtimeEventsTests(TestCase):
+    """Live "something changed" events (api/core/realtime.py)."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+
+        from api.friends.models import Friendship
+
+        cache.clear()
+        User = get_user_model()
+        self.author = User.objects.create_user(email="rt_a@test.com", username="rt_a", password="pw")
+        self.friend = User.objects.create_user(email="rt_f@test.com", username="rt_f", password="pw")
+        self.stranger = User.objects.create_user(email="rt_s@test.com", username="rt_s", password="pw")
+        Friendship.objects.create(sender=self.author, receiver=self.friend)
+
+    def _announce(self, privacy):
+        from api.post.models import Post
+        from api.post.tasks import announce_new_post
+
+        post = Post.objects.create(author=self.author, content_text="hi", privacy=privacy)
+        with patch("api.core.realtime.notify_users") as notify, patch("api.core.realtime.broadcast") as bcast:
+            announce_new_post(str(post.pk))
+        return notify, bcast
+
+    def test_public_post_tells_friends_and_everyone(self):
+        notify, bcast = self._announce("PUBLIC")
+        self.assertEqual(set(notify.call_args.args[0]), {self.friend.id})
+        bcast.assert_called_once_with("feed.new_post")
+
+    def test_friends_only_post_tells_only_friends(self):
+        notify, bcast = self._announce("FRIENDS_ONLY")
+        self.assertEqual(set(notify.call_args.args[0]), {self.friend.id})
+        bcast.assert_not_called()
+
+    def test_private_post_tells_nobody(self):
+        notify, bcast = self._announce("PRIVATE")
+        notify.assert_not_called()
+        bcast.assert_not_called()
+
+    def test_broadcasts_are_batched(self):
+        from api.core import realtime
+
+        with patch.object(realtime, "send_broadcast_now") as now, patch(
+            "api.notifications.tasks.send_broadcast_event.apply_async"
+        ) as later:
+            for _ in range(5):
+                realtime.broadcast("feed.new_post")
+        # First one right away, the rest folded into one at the window's end.
+        now.assert_called_once_with("feed.new_post")
+        later.assert_called_once()
+        self.assertEqual(later.call_args.kwargs["countdown"], realtime.BROADCAST_WINDOW_S["feed.new_post"])
+
+
+@override_settings(CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}})
+class AppEventsConsumerTests(TestCase):
+    """The /ws/events/ socket delivers events to the right users."""
+
+    def test_user_and_broadcast_events_arrive(self):
+        from asgiref.sync import async_to_sync
+        from channels.testing import WebsocketCommunicator
+        from django.contrib.auth import get_user_model
+
+        from api.core import realtime
+        from api.core.consumers import AppEventsConsumer
+
+        user = get_user_model().objects.create_user(email="ws@test.com", username="ws", password="pw")
+
+        async def run():
+            communicator = WebsocketCommunicator(AppEventsConsumer.as_asgi(), "/ws/events/")
+            communicator.scope["user"] = user
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            from channels.layers import get_channel_layer
+
+            layer = get_channel_layer()
+            await layer.group_send(realtime.user_group(user.id), {"type": "app.event", "kind": "feed.new_post"})
+            self.assertEqual(await communicator.receive_json_from(), {"type": "feed.new_post"})
+
+            await layer.group_send(realtime.BROADCAST_GROUP, {"type": "app.event", "kind": "sitters.new"})
+            self.assertEqual(await communicator.receive_json_from(), {"type": "sitters.new"})
+            await communicator.disconnect()
+
+        async_to_sync(run)()
+
+    def test_anonymous_is_rejected(self):
+        from asgiref.sync import async_to_sync
+        from channels.testing import WebsocketCommunicator
+        from django.contrib.auth.models import AnonymousUser
+
+        from api.core.consumers import AppEventsConsumer
+
+        async def run():
+            communicator = WebsocketCommunicator(AppEventsConsumer.as_asgi(), "/ws/events/")
+            communicator.scope["user"] = AnonymousUser()
+            connected, _ = await communicator.connect()
+            self.assertFalse(connected)
+
+        async_to_sync(run)()
+
+
+class SitterEventsTests(TestCase):
+    """A sitter becoming findable nearby tells connected apps."""
+
+    def _user(self, name, user_type):
+        from django.contrib.auth import get_user_model
+
+        return get_user_model().objects.create_user(
+            email=f"{name}@test.com", username=name, password="pw", user_type=user_type
+        )
+
+    def _set_location(self, user):
+        from django.contrib.gis.geos import Point
+
+        from api.users.models import Profile
+
+        profile, _ = Profile.objects.get_or_create(user=user)
+        with patch("api.core.realtime.broadcast") as bcast, self.captureOnCommitCallbacks(execute=True):
+            profile.location_point = Point(1.0, 1.0)
+            profile.save()
+        return bcast
+
+    def test_sitter_location_announces(self):
+        self._set_location(self._user("sit1", "petsitter")).assert_called_once_with("sitters.new")
+
+    def test_parent_location_does_not(self):
+        self._set_location(self._user("par1", "petparent")).assert_not_called()
+
+    def test_becoming_a_sitter_with_a_location_announces(self):
+        user = self._user("switch1", "petparent")
+        self._set_location(user)
+        with patch("api.core.realtime.broadcast") as bcast, self.captureOnCommitCallbacks(execute=True):
+            user.user_type = "petsitter"
+            user.save()
+        bcast.assert_called_once_with("sitters.new")

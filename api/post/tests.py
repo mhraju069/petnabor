@@ -404,3 +404,16 @@ class FeedNewCountTest(PostBaseTestCase):
         response = self.client.get(reverse('post-feed-new-count'), {"since": "2026-13-45T00:00:00Z"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['count'], 0)
+
+
+class DeletedPostDetailTest(PostBaseTestCase):
+    """The app shows "Post not found" on a 404 — a deleted post must give one."""
+
+    def test_deleted_post_returns_404(self):
+        post = Post.objects.create(author=self.alice, content_text="bye", privacy=PrivacyChoices.PUBLIC)
+        url = reverse('post-detail', kwargs={'pk': post.id})
+        self.client.force_authenticate(self.bob)
+        self.assertEqual(self.client.get(url).status_code, status.HTTP_200_OK)
+
+        Post.objects.filter(pk=post.pk).update(is_deleted=True)
+        self.assertEqual(self.client.get(url).status_code, status.HTTP_404_NOT_FOUND)
