@@ -874,7 +874,6 @@ def handle_payment_intent_succeeded(payment_intent):
             # Attempt immediate release in case the recipient JUST connected their account
             # (race condition: account.updated webhook arrived before payment_intent.succeeded)
             try:
-                from .models import StripeConnectAccount
                 connect_acct = StripeConnectAccount.objects.filter(
                     user_id=tip.recipient_id,
                     is_charges_enabled=True,
