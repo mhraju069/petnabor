@@ -243,11 +243,13 @@ class MessageListCreateView(views.APIView):
     def get(self, request, thread_id):
         messages = services.get_messages_in_thread(request.user, thread_id)
 
-        # Mark as read (update query — no N+1)
-        try:
-            services.mark_messages_read(request.user, thread_id)
-        except Exception:
-            logger.exception("Failed to mark messages as read for thread %s", thread_id)
+        # Opening the chat (first page) marks it read; loading older pages
+        # while scrolling up doesn't need to.
+        if not request.query_params.get("cursor"):
+            try:
+                services.mark_messages_read(request.user, thread_id)
+            except Exception:
+                logger.exception("Failed to mark messages as read for thread %s", thread_id)
 
         paginator = MessagePagination()
         page = paginator.paginate_queryset(messages, request)

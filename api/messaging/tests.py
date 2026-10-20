@@ -277,11 +277,13 @@ class MessageAPITest(MessagingBaseTestCase):
         self.make_friends(self.alice, self.bob)
         thread = self._create_direct_thread(self.alice, self.bob)
         self.client.force_authenticate(self.alice)
-        self.client.post(
-            self._msg_list_url(thread.id),
-            {"text_content": "Hey"},
-            format="json",
-        )
+        # The push is queued once the message is committed.
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(
+                self._msg_list_url(thread.id),
+                {"text_content": "Hey"},
+                format="json",
+            )
         self.assertTrue(mock_notify.called)
 
     def test_ex_friend_with_prior_thread_can_send_message(self, mock_notify):
@@ -708,7 +710,8 @@ class ThreadMuteTest(MessagingBaseTestCase):
         self.client.post(self.mute_url)
 
         self.client.force_authenticate(self.alice)
-        response = self.client.post(self.messages_url, {"text_content": "hi"}, format="json")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.messages_url, {"text_content": "hi"}, format="json")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         # The message is still delivered, but no push is queued for Bob.
         self.assertEqual(Message.objects.filter(thread=self.thread).count(), 1)
@@ -717,7 +720,8 @@ class ThreadMuteTest(MessagingBaseTestCase):
     @patch("api.messaging.tasks.notify_new_message")
     def test_unmuted_user_gets_push(self, notify):
         self.client.force_authenticate(self.alice)
-        self.client.post(self.messages_url, {"text_content": "hi"}, format="json")
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(self.messages_url, {"text_content": "hi"}, format="json")
         notify.delay.assert_called_once()
         self.assertIn(str(self.bob.id), notify.delay.call_args.args[3])
 
@@ -770,3 +774,88 @@ class MessageAdminPrivacyTest(MessagingBaseTestCase):
         self.client.post(url, {"text_content": "edited"})
         self.private.refresh_from_db()
         self.assertEqual(self.private.text_content, "my secret plans")
+
+
+# ──────────────────────────────────────────────
+# Realtime delivery (after commit, receipts, deletes)
+# ──────────────────────────────────────────────
+
+
+@patch("api.messaging.tasks.notify_new_message")
+class RealtimeDeliveryTest(MessagingBaseTestCase):
+    def setUp(self):
+        super().setUp()
+        self.make_friends(self.alice, self.bob)
+        self.thread = ChatThread.objects.create(thread_type=ThreadTypes.DIRECT, created_by=self.alice)
+        ThreadParticipant.objects.bulk_create([
+            ThreadParticipant(thread=self.thread, user=self.alice),
+            ThreadParticipant(thread=self.thread, user=self.bob),
+        ])
+        self.url = reverse("message-list-create", kwargs={"thread_id": self.thread.id})
+
+    def _events(self, broadcast, event_type):
+        return [c.args for c in broadcast.call_args_list if c.args[1]["type"] == event_type]
+
+    @patch("api.messaging.services._broadcast")
+    def test_new_message_broadcast_only_after_commit(self, broadcast, _notify):
+        self.client.force_authenticate(self.alice)
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            self.client.post(self.url, {"text_content": "Hey"}, format="json")
+        broadcast.assert_not_called()  # not before the message is saved
+
+        for callback in callbacks:
+            callback()
+        (user_ids, event), = self._events(broadcast, "chat_message")
+        self.assertEqual(set(user_ids), {self.alice.id, self.bob.id})
+        self.assertEqual(event["message"]["thread_preview"], "Hey")
+        self.assertEqual(event["message"]["text_content"], "Hey")
+
+    @patch("api.messaging.services._broadcast")
+    def test_reading_clears_cached_inbox_and_sends_receipt(self, broadcast, _notify):
+        from django.core.cache import cache
+
+        Message.objects.create(thread=self.thread, sender=self.alice, text_content="Hi")
+        cache.set(f"user_inbox_{self.bob.id}_page_1", {"stale": True}, 300)
+
+        self.client.force_authenticate(self.bob)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.get(self.url)
+
+        self.assertIsNone(cache.get(f"user_inbox_{self.bob.id}_page_1"))
+        (user_ids, event), = self._events(broadcast, "message_read")
+        self.assertEqual(user_ids, [self.alice.id])
+        self.assertEqual(event["reader_id"], str(self.bob.id))
+
+        # Nothing new to read: no second receipt.
+        broadcast.reset_mock()
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.get(self.url)
+        self.assertEqual(self._events(broadcast, "message_read"), [])
+
+    def test_older_pages_do_not_mark_read(self, _notify):
+        Message.objects.create(thread=self.thread, sender=self.alice, text_content="Hi")
+        self.client.force_authenticate(self.bob)
+        self.client.get(self.url, {"cursor": "cD0yMDI1"})
+        self.assertTrue(Message.objects.filter(is_read=False).exists())
+
+    @patch("api.messaging.services._broadcast")
+    def test_delete_for_everyone_updates_preview_and_notifies(self, broadcast, _notify):
+        from .services import message_preview
+
+        first = Message.objects.create(thread=self.thread, sender=self.alice, text_content="first")
+        last = Message.objects.create(thread=self.thread, sender=self.alice, text_content="oops")
+        ChatThread.objects.filter(id=self.thread.id).update(
+            last_message_text="oops", last_message_timestamp=last.created_at
+        )
+
+        self.client.force_authenticate(self.alice)
+        url = reverse("message-detail", kwargs={"thread_id": self.thread.id, "message_id": last.id})
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.thread.refresh_from_db()
+        self.assertEqual(self.thread.last_message_text, message_preview(first.message_type, "first"))
+        (user_ids, event), = self._events(broadcast, "message_deleted")
+        self.assertEqual(set(user_ids), {self.alice.id, self.bob.id})
+        self.assertEqual(event["message_ids"], [str(last.id)])

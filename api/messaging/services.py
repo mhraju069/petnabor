@@ -56,6 +56,55 @@ def invalidate_inbox_cache(user_id):
 
 
 # ──────────────────────────────────────────────
+# Realtime helpers
+# ──────────────────────────────────────────────
+
+
+def message_preview(message_type, text_content):
+    """The inbox line for a message (also stored on the thread)."""
+    if message_type == MessageTypes.STORY_REPLY:
+        return f"Story reply: {text_content}"[:255]
+    if message_type == MessageTypes.IMAGE:
+        return (f"📷 {text_content}" if text_content else "📷 Photo")[:255]
+    return (text_content or message_type)[:255]
+
+
+def _active_participant_ids(thread_id):
+    return list(
+        ThreadParticipant.objects.filter(thread_id=thread_id, left_at__isnull=True)
+        .values_list("user_id", flat=True)
+    )
+
+
+def _broadcast(user_ids, event):
+    """Send one channel-layer event to each user's personal group. Never raises."""
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        channel_layer = get_channel_layer()
+        send = async_to_sync(channel_layer.group_send)
+        for user_id in user_ids:
+            send(f"user_{user_id}", event)
+    except Exception:
+        logger.exception("Failed to broadcast WebSocket event %s", event.get("type"))
+
+
+def _refresh_thread_preview(thread_id):
+    """Point the thread's stored preview at its latest visible message."""
+    latest = (
+        Message.objects.filter(thread_id=thread_id, is_deleted_for_everyone=False)
+        .only("message_type", "text_content", "created_at")
+        .order_by("-created_at")
+        .first()
+    )
+    ChatThread.objects.filter(id=thread_id).update(
+        last_message_text=message_preview(latest.message_type, latest.text_content) if latest else None,
+        **({"last_message_timestamp": latest.created_at} if latest else {}),
+    )
+
+
+# ──────────────────────────────────────────────
 # Permission check
 # ──────────────────────────────────────────────
 
@@ -251,7 +300,7 @@ def get_messages_in_thread(user, thread_id):
     thread, membership = get_thread_for_participant(user, thread_id)
 
     qs = (
-        Message.objects.select_related("sender__profile", "reply_to__sender")
+        Message.objects.select_related("sender__profile", "reply_to__sender__profile")
         .filter(thread_id=thread_id, is_deleted_for_everyone=False)
         .order_by("-created_at")
     )
@@ -349,12 +398,7 @@ def send_message(
         message.save(update_fields=["media_url"])
 
     # Update denormalized inbox fields
-    if message_type == MessageTypes.STORY_REPLY:
-        preview = f"Story reply: {text_content}"[:255]
-    elif message_type == MessageTypes.IMAGE:
-        preview = (f"📷 {text_content}" if text_content else "📷 Photo")[:255]
-    else:
-        preview = (text_content or message_type)[:255]
+    preview = message_preview(message_type, text_content)
     ChatThread.objects.filter(id=thread.id).update(
         last_message_text=preview,
         last_message_timestamp=message.created_at,
@@ -364,15 +408,28 @@ def send_message(
     if thread.thread_type == ThreadTypes.DIRECT:
         ThreadParticipant.objects.filter(thread=thread, left_at__isnull=False).update(left_at=None)
 
-    # Async push notification (FCM)
+    # Push + realtime only once the message is committed: before that, a
+    # receiver refetching (or the push task) could miss it, and the inbox
+    # list rebuilt for the socket was cached without it.
+    transaction.on_commit(lambda: _after_message_sent(message, thread, sender, preview))
+
+    return message
+
+
+def _after_message_sent(message, thread, sender, preview):
+    """Push notification + WebSocket delivery for a committed message."""
+    participant_ids = _active_participant_ids(thread.id)
+
+    # Async push notification (FCM). Muted participants still get the
+    # message, just no push.
     try:
         from .tasks import notify_new_message
-        # Muted participants still get the message, just no push.
-        recipient_ids = list(
-            ThreadParticipant.objects.filter(thread=thread, left_at__isnull=True, is_muted=False)
-            .exclude(user=sender)
+
+        muted = set(
+            ThreadParticipant.objects.filter(thread=thread, left_at__isnull=True, is_muted=True)
             .values_list("user_id", flat=True)
         )
+        recipient_ids = [uid for uid in participant_ids if uid != sender.id and uid not in muted]
         if recipient_ids:
             notify_new_message.delay(
                 str(message.id),
@@ -384,23 +441,20 @@ def send_message(
     except Exception:
         logger.exception("Failed to queue messaging push notification")
 
-    # Real-time WebSocket broadcast
     try:
-        from asgiref.sync import async_to_sync
-        from channels.layers import get_channel_layer
+        from api.notifications.services import avatar_url
 
-        channel_layer = get_channel_layer()
-
-        # Build a plain-dict payload — all UUIDs converted to str so
-        # channels_redis / msgpack can serialize without error.
+        # Plain-dict payload: all UUIDs as str so channels_redis/msgpack can
+        # serialize it.
         ws_payload = {
             "id": str(message.id),
             "thread": str(thread.id),
             "sender": {
-                "id": str(message.sender.id),
-                "username": message.sender.username,
-                "first_name": message.sender.first_name,
-                "last_name": message.sender.last_name,
+                "id": str(sender.id),
+                "username": sender.username,
+                "first_name": sender.first_name,
+                "last_name": sender.last_name,
+                "avatar": avatar_url(sender) or None,
             },
             "message_type": message.message_type,
             "text_content": message.text_content,
@@ -408,64 +462,75 @@ def send_message(
             "metadata": message.metadata,
             "reply_to": None,
             "is_read": message.is_read,
+            "is_edited": False,
+            "is_deleted_for_everyone": False,
             "created_at": message.created_at.isoformat(),
+            "updated_at": message.updated_at.isoformat(),
+            # Lets the app update its inbox row without refetching the list.
+            "thread_preview": preview,
         }
-
         if message.reply_to:
+            reply_sender = message.reply_to.sender
             ws_payload["reply_to"] = {
                 "id": str(message.reply_to.id),
                 "sender": {
-                    "id": str(message.reply_to.sender.id),
-                    "username": message.reply_to.sender.username,
-                    "first_name": message.reply_to.sender.first_name,
-                    "last_name": message.reply_to.sender.last_name,
-                    "avatar": None,  # Simplified for WS
-                },
+                    "id": str(reply_sender.id),
+                    "username": reply_sender.username,
+                    "first_name": reply_sender.first_name,
+                    "last_name": reply_sender.last_name,
+                    "avatar": None,
+                } if reply_sender else None,
                 "text_content": message.reply_to.text_content,
                 "media_url": message.reply_to.media_url,
                 "message_type": message.reply_to.message_type,
             }
-
-        all_participant_ids = list(
-            ThreadParticipant.objects.filter(thread=thread, left_at__isnull=True)
-            .values_list("user_id", flat=True)
-        )
-
-        for p_id in all_participant_ids:
-            # Invalidate inbox cache for this participant
-            invalidate_inbox_cache(p_id)
-
-            # 1) Deliver the new message to the open chat window
-            async_to_sync(channel_layer.group_send)(
-                f"user_{str(p_id)}",   # str() prevents UUID serialization error
-                {
-                    "type": "chat_message",
-                    "message": ws_payload,
-                }
-            )
-
-            # 2) Signal the consumer to re-fetch and push the updated thread
-            #    list so the inbox re-orders instantly (thread bubbles to top).
-            async_to_sync(channel_layer.group_send)(
-                f"user_{str(p_id)}",
-                {
-                    "type": "thread_list_update",
-                }
-            )
     except Exception:
-        logger.exception("Failed to broadcast WebSocket message")
+        logger.exception("Failed to build WebSocket payload for message %s", message.id)
+        return
 
-    return message
+    for p_id in participant_ids:
+        invalidate_inbox_cache(p_id)
+    _broadcast(participant_ids, {"type": "chat_message", "message": ws_payload})
+    # Older app versions rebuild their inbox from a pushed list; newer ones
+    # apply `thread_preview` themselves (the consumer skips this for them).
+    _broadcast(participant_ids, {"type": "thread_list_update", "reason": "new_message"})
 
 
 def mark_messages_read(user, thread_id):
-    """Mark all unread messages in a thread as read for this user."""
+    """
+    Mark all unread messages in a thread as read for this user, and tell the
+    other participants (read receipts). Returns how many were marked.
+    """
     get_thread_for_participant(user, thread_id)  # verify membership
-    Message.objects.filter(
+    updated = Message.objects.filter(
         thread_id=thread_id,
         is_read=False,
         is_deleted_for_everyone=False,
     ).exclude(sender=user).update(is_read=True)
+
+    if updated:
+        # The cached inbox still had this chat's unread count.
+        invalidate_inbox_cache(user.id)
+        others = [uid for uid in _active_participant_ids(thread_id) if uid != user.id]
+        transaction.on_commit(lambda: _broadcast(others, {
+            "type": "message_read",
+            "thread_id": str(thread_id),
+            "reader_id": str(user.id),
+        }))
+    return updated
+
+
+def _after_messages_deleted(thread_id, message_ids):
+    """Deleted for everyone: fix the inbox preview and tell everyone live."""
+    _refresh_thread_preview(thread_id)
+    participant_ids = _active_participant_ids(thread_id)
+    for p_id in participant_ids:
+        invalidate_inbox_cache(p_id)
+    transaction.on_commit(lambda: _broadcast(participant_ids, {
+        "type": "message_deleted",
+        "thread_id": str(thread_id),
+        "message_ids": [str(m) for m in message_ids],
+    }))
 
 
 def delete_message_for_everyone(user, thread_id, message_id):
@@ -488,6 +553,7 @@ def delete_message_for_everyone(user, thread_id, message_id):
     message.save(
         update_fields=["is_deleted_for_everyone", "text_content", "media_url", "media_file", "updated_at"]
     )
+    _after_messages_deleted(thread_id, [message.id])
     return message
 
 
@@ -511,12 +577,15 @@ def delete_messages_bulk(user, thread_id, message_ids):
         message.media_file = None
         message.save(update_fields=["media_file"])
 
+    deleted_ids = list(messages.values_list("id", flat=True))
     count = messages.update(
         is_deleted_for_everyone=True,
         text_content=None,
         media_url=None,
         updated_at=timezone.now(),
     )
+    if deleted_ids:
+        _after_messages_deleted(thread_id, deleted_ids)
     return count
 
 
@@ -555,20 +624,8 @@ def clear_thread_history(user, thread_id):
     # Invalidate cache so the next inbox fetch correctly calculates last_message as None
     invalidate_inbox_cache(user.id)
 
-    # Broadcast thread list update via WebSocket so the frontend instantly refreshes
-    try:
-        from asgiref.sync import async_to_sync
-        from channels.layers import get_channel_layer
-        
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"user_{str(user.id)}",
-            {
-                "type": "thread_list_update",
-            }
-        )
-    except Exception:
-        logger.exception("Failed to broadcast WebSocket thread_list_update on clear history")
+    # Tell this user's other open apps/devices to refresh their inbox.
+    _broadcast([user.id], {"type": "thread_list_update"})
 
 
 @transaction.atomic

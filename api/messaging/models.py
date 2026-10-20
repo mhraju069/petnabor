@@ -14,6 +14,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 def chat_media_path(instance, filename):
@@ -213,6 +214,13 @@ class Message(models.Model):
             models.Index(fields=["thread", "-created_at"]),
             models.Index(fields=["sender"]),
             models.Index(fields=["reply_to"]),
+            # Unread counts (inbox, badges): only unread rows are indexed,
+            # so it stays small however long the history gets.
+            models.Index(
+                fields=["thread", "sender"],
+                condition=Q(is_read=False, is_deleted_for_everyone=False),
+                name="msg_unread_by_thread",
+            ),
         ]
 
     def __str__(self):

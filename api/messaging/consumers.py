@@ -1,4 +1,6 @@
 import json
+from urllib.parse import parse_qs
+
 from django.core.cache import cache
 from django.db.models import Count, Prefetch
 from django.utils import timezone
@@ -17,6 +19,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # Derive the base URL (scheme + host) from the WS scope so we can
         # build absolute media URLs identical to request.build_absolute_uri().
         self.base_url = self._get_base_url()
+
+        # Client protocol (`&v=2`): v2 apps update their inbox from each
+        # new_message (`thread_preview`) and refetch on `threads_changed`,
+        # so they don't need a rebuilt 20-thread list after every message.
+        query = parse_qs(self.scope.get("query_string", b"").decode())
+        try:
+            self.protocol = int((query.get("v") or ["1"])[0])
+        except ValueError:
+            self.protocol = 1
 
         # Join a personal group to receive notifications intended for this user
         self.user_group = f"user_{self.user.id}"
@@ -71,28 +82,16 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 thread_id = data.get("thread_id")
                 if thread_id:
                     await self.handle_mark_read(thread_id)
-                    
+            elif action == "ping":
+                await self.send(text_data=json.dumps({"type": "pong"}))
+
         except Exception:
             pass
 
     async def handle_mark_read(self, thread_id):
-        # Delegate to service (wrapped in sync_to_async)
+        # The service marks them read and sends the read receipt to the
+        # other participants (only when something was actually unread).
         await database_sync_to_async(services.mark_messages_read)(self.user, thread_id)
-        
-        # Broadcast the 'read' event to other participants in the thread
-        # Note: In a production app with 1M users, we avoid putting 1M users 
-        # in one group. Instead, we pull participants and notify their personal groups.
-        participants = await self.get_thread_participants(thread_id)
-        for p_id in participants:
-            if str(p_id) != str(self.user.id):
-                await self.channel_layer.group_send(
-                    f"user_{p_id}",
-                    {
-                        "type": "message_read",
-                        "thread_id": thread_id,
-                        "reader_id": str(self.user.id)
-                    }
-                )
 
     @database_sync_to_async
     def get_thread_participants(self, thread_id):
@@ -287,13 +286,24 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "reader_id": event["reader_id"]
         }))
 
+    async def message_deleted(self, event):
+        """Messages deleted for everyone."""
+        await self.send(text_data=json.dumps({
+            "type": "message_deleted",
+            "thread_id": event["thread_id"],
+            "message_ids": event["message_ids"],
+        }))
+
     async def thread_list_update(self, event):
         """
-        Triggered when a new message is sent to any thread for this user.
-        Fetches the current user's top-20 thread list from the DB and
-        pushes it to the client so the frontend can re-render the inbox
-        with the active thread moved to the top.
+        The user's inbox changed. v2 clients get a tiny "refetch" signal (and
+        nothing for new messages: they apply those themselves). Older clients
+        get the rebuilt top-20 thread list, as before.
         """
+        if self.protocol >= 2:
+            if event.get("reason") != "new_message":
+                await self.send(text_data=json.dumps({"type": "threads_changed"}))
+            return
         threads = await self.get_top_threads()
         await self.send(text_data=json.dumps({
             "type": "thread_list_update",
