@@ -87,6 +87,10 @@ INSTALLED_APPS = [
     "django_prometheus",
 ]
 
+# Child safety point of contact, shown on /child-safety/ (Google Play's
+# Child Safety Standards). A monitored inbox; a dedicated one is best.
+CHILD_SAFETY_EMAIL = os.getenv("CHILD_SAFETY_EMAIL", "support@petnabor.com")
+
 # ── Logging ───────────────────────────────────────────────────────────────
 # Everything to the console (= `docker compose logs`, and Grafana → Loki).
 # Without this, Django in production (DEBUG=False) printed no tracebacks at

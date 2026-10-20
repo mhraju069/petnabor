@@ -3,7 +3,7 @@ from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -154,3 +154,17 @@ class WebAccountDeletionTest(TestCase):
         response = self.client.post(self.url, {"email": "webleaver@test.com"})
         self.assertContains(response, "Too many requests")
         self.assertEqual(mock_send.call_count, 5)
+
+
+class ChildSafetyStandardsPageTest(TestCase):
+    """Public page Google Play's Child Safety Standards declaration links to."""
+
+    @override_settings(CHILD_SAFETY_EMAIL="safety@example.com")
+    def test_public_and_has_what_google_checks(self):
+        response = self.client.get(reverse("child-safety"))  # no login
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Pet Nabor Child Safety Standards")
+        self.assertContains(response, "child sexual abuse and exploitation (CSAE)")
+        self.assertContains(response, "zero tolerance")
+        self.assertContains(response, "safety@example.com")
+        self.assertEqual(response["Content-Type"].split(";")[0], "text/html")
