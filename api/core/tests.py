@@ -262,3 +262,42 @@ class MetricsEndpointTests(TestCase):
         response = self.client.get("/metrics/", HTTP_AUTHORIZATION="Bearer s3cret")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"django_http_requests", response.content)
+
+
+class RequestIdTests(TestCase):
+    """Each request gets an id: in the response header and in its log lines."""
+
+    def test_response_has_an_id(self):
+        response = self.client.get("/delete-account/")
+        self.assertRegex(response["X-Request-ID"], r"^[0-9a-f]{12}$")
+
+    def test_client_id_is_kept_and_bad_ones_replaced(self):
+        response = self.client.get("/delete-account/", HTTP_X_REQUEST_ID="app-abc123")
+        self.assertEqual(response["X-Request-ID"], "app-abc123")
+        response = self.client.get("/delete-account/", HTTP_X_REQUEST_ID="bad id\nINJECTED")
+        self.assertRegex(response["X-Request-ID"], r"^[0-9a-f]{12}$")
+
+    def test_log_lines_carry_the_id(self):
+        import logging
+
+        from api.core.request_id import RequestIdLogFilter, RequestIdMiddleware
+
+        seen = {}
+
+        def view(request):
+            record = logging.LogRecord("t", logging.INFO, __file__, 1, "hi", None, None)
+            RequestIdLogFilter().filter(record)
+            seen["id"] = record.request_id
+            from django.http import HttpResponse
+
+            return HttpResponse("ok")
+
+        from django.test import RequestFactory
+
+        response = RequestIdMiddleware(view)(RequestFactory().get("/"))
+        self.assertEqual(seen["id"], response["X-Request-ID"])
+
+        # Outside a request: a placeholder, not an error.
+        record = logging.LogRecord("t", logging.INFO, __file__, 1, "hi", None, None)
+        RequestIdLogFilter().filter(record)
+        self.assertEqual(record.request_id, "-")

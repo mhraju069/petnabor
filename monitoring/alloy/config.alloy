@@ -1,0 +1,59 @@
+// Grafana Alloy: ships logs to Loki.
+//   1. Every Docker container's output (web, celery, db, redis, …),
+//      labelled by its compose service.
+//   2. The host nginx logs (/var/log/nginx): every request with its status.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = []
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.containers.targets
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.levels.receiver]
+}
+
+// A "level" label (ERROR / WARNING / INFO) from the line text, so Grafana
+// can filter and count errors per service.
+loki.process "levels" {
+  stage.regex {
+    expression = "(?P<level>CRITICAL|ERROR|WARNING|INFO|DEBUG)"
+  }
+  stage.labels {
+    values = { level = "" }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+local.file_match "nginx" {
+  path_targets = [
+    {"__path__" = "/var/log/nginx/access.log", "service" = "nginx", "log" = "access"},
+    {"__path__" = "/var/log/nginx/error.log", "service" = "nginx", "log" = "error"},
+  ]
+}
+
+loki.source.file "nginx" {
+  targets    = local.file_match.nginx.targets
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

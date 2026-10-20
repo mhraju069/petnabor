@@ -1,6 +1,15 @@
+# Container output (`docker compose logs`, Grafana → Loki) — capped so it
+# can't fill the disk: 5 files × 20 MB per service.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
 
   db:
+    logging: *default-logging
     image: postgis/postgis:16-3.4-alpine
     volumes:
       - postgres_data:/var/lib/postgresql/data/
@@ -11,11 +20,13 @@ services:
     restart: unless-stopped
 
   redis:
+    logging: *default-logging
     image: redis:7-alpine
     restart: unless-stopped
 
 
   web:
+    logging: *default-logging
     build: .
     command: gunicorn config.asgi:application -c config/gunicorn.conf.py -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 --workers 4
     restart: unless-stopped
@@ -36,6 +47,7 @@ services:
       - "127.0.0.1:8000:8000"
 
   celery:
+    logging: *default-logging
     build: .
     # -E: send task events (Flower turns them into Grafana metrics).
     command: celery -A config worker -B -E -l info

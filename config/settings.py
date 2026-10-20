@@ -87,6 +87,49 @@ INSTALLED_APPS = [
     "django_prometheus",
 ]
 
+# ── Logging ───────────────────────────────────────────────────────────────
+# Everything to the console (= `docker compose logs`, and Grafana → Loki).
+# Without this, Django in production (DEBUG=False) printed no tracebacks at
+# all for 500 errors, and app log messages were dropped.
+#   2026-10-20 14:03:11 ERROR api.users.exception_handler [req=3f9a1c2b7d4e] Unhandled …
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {"request_id": {"()": "api.core.request_id.RequestIdLogFilter"}},
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s %(levelname)s %(name)s [req=%(request_id)s] %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "standard",
+            "filters": ["request_id"],
+        },
+    },
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        # 500s from plain Django views (DRF ones go through the exception
+        # handler's logger.exception) — with the full traceback.
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        # Bad Host headers from internet scanners: noise.
+        "django.security.DisallowedHost": {"handlers": [], "propagate": False},
+        # Very chatty at INFO.
+        "botocore": {"level": "WARNING"},
+        "urllib3": {"level": "WARNING"},
+        "cloudinary": {"level": "WARNING"},
+        "PIL": {"level": "WARNING"},
+        "asyncio": {"level": "WARNING"},
+        "daphne": {"level": "WARNING"},
+        "channels_redis": {"level": "WARNING"},
+    },
+}
+
 # ── Monitoring (Prometheus → Grafana; see monitoring/README.md) ───────────
 # /metrics/ answers only with "Authorization: Bearer <METRICS_TOKEN>";
 # without the setting it's off (404).
@@ -95,6 +138,8 @@ METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
 MIDDLEWARE = [
     # Request count / latency / status metrics for Grafana (see /metrics/).
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
+    # Tags each request (and its log lines) with an id — api/core/request_id.py.
+    "api.core.request_id.RequestIdMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",

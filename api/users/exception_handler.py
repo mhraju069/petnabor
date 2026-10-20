@@ -172,10 +172,14 @@ def custom_exception_handler(exc, context):
 
     # Completely unexpected error — log it, return generic message
     logger.exception("Unhandled exception in %s", context.get("view", "unknown"))
+    from api.core.request_id import get_request_id
+
     return Response(
         {
             "success": False,
             "message": "An internal error occurred. Please try again later.",
+            # Same id as in the server logs: search it in Grafana → Explore.
+            "error_id": get_request_id(),
         },
         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )

@@ -11,8 +11,12 @@ Prometheus collects numbers every 30 seconds; Grafana shows them.
 | Postgres: connections, load, size, locks | postgres-exporter | PostgreSQL Database |
 | Redis: memory, clients, commands | redis-exporter | Redis |
 
+**Logs** (errors with tracebacks, every service + nginx, kept 14 days):
+Loki + Alloy → dashboard **PetNabor logs**. How to track down a user's
+error: [LOGS.md](LOGS.md).
+
 Everything listens on `127.0.0.1` only. Data is kept 15 days (max 5 GB).
-Needs about **1 GB of free RAM** on the server.
+Needs about **1.5 GB of free RAM** on the server (with logs).
 
 ## First-time setup (on the server, in the project folder)
 
