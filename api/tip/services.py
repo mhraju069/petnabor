@@ -237,6 +237,95 @@ def get_connect_account_status(user):
     return connect
 
 
+_PAYOUT_INTERVAL_LABELS = {
+    "manual": "Manual",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "monthly": "Monthly",
+}
+
+
+def get_connect_account_details(user):
+    """
+    What the user's payout account looks like on Stripe, for the app's
+    "Payout account" screen: email, country, bank (last 4 only) and what
+    Stripe still needs. Read-only; status syncing stays in
+    get_connect_account_status. Returns None when there is no account.
+    """
+    s = _stripe()
+    try:
+        connect = user.stripe_connect_account
+    except StripeConnectAccount.DoesNotExist:
+        return None
+
+    details = {
+        "stripe_account_id": connect.stripe_account_id,
+        "needs_reconnect": connect.needs_reconnect,
+        "is_onboarding_complete": connect.is_onboarding_complete,
+        "is_charges_enabled": connect.is_charges_enabled,
+        "is_payouts_enabled": connect.is_payouts_enabled,
+        "is_fully_verified": connect.is_fully_verified,
+        "connected_since": connect.created_at,
+        "email": "",
+        "country": "",
+        "default_currency": "",
+        "bank": None,
+        "payout_schedule": "",
+        "requirements_due": 0,
+        "disabled_reason": "",
+    }
+    if connect.needs_reconnect:
+        return details
+
+    try:
+        account = s.Account.retrieve(connect.stripe_account_id)
+    except (stripe.error.InvalidRequestError, stripe.error.PermissionError) as exc:
+        if not _account_unusable(exc):
+            raise
+        _mark_needs_reconnect(connect, exc)
+        details["needs_reconnect"] = True
+        return details
+
+    details["email"] = account.get("email") or ""
+    details["country"] = account.get("country") or ""
+    details["default_currency"] = (account.get("default_currency") or "").upper()
+
+    external = (account.get("external_accounts") or {}).get("data") or []
+    bank = next((x for x in external if x.get("default_for_currency")), None) or (
+        external[0] if external else None
+    )
+    if bank:
+        is_card = bank.get("object") == "card"
+        details["bank"] = {
+            "type": "card" if is_card else "bank_account",
+            "name": (bank.get("brand") if is_card else bank.get("bank_name")) or "",
+            "last4": bank.get("last4") or "",
+            "currency": (bank.get("currency") or "").upper(),
+        }
+
+    schedule = ((account.get("settings") or {}).get("payouts") or {}).get("schedule") or {}
+    interval = schedule.get("interval") or ""
+    details["payout_schedule"] = _PAYOUT_INTERVAL_LABELS.get(interval, interval.title())
+
+    requirements = account.get("requirements") or {}
+    details["requirements_due"] = len(requirements.get("currently_due") or []) + len(
+        requirements.get("past_due") or []
+    )
+    details["disabled_reason"] = requirements.get("disabled_reason") or ""
+    return details
+
+
+def create_dashboard_link(user):
+    """
+    One-time link to the user's Stripe Express dashboard (bank, payouts,
+    tax info). Only exists once onboarding is submitted.
+    """
+    s = _stripe()
+    connect = user.stripe_connect_account  # caller checks existence
+    link = s.Account.create_login_link(connect.stripe_account_id)
+    return link.url
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Tip — Payment Intent
 # ──────────────────────────────────────────────────────────────────────────────

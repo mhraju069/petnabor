@@ -105,6 +105,66 @@ class ConnectStatusView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class ConnectDetailsView(APIView):
+    """
+    GET /tip/connect/details/
+    The user's payout account as Stripe has it (email, bank last 4, payout
+    schedule, what's still needed), for the app's "Payout account" screen.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Get Stripe Connect account details",
+        responses={
+            200: OpenApiResponse(description="Account details, or {'is_connect': False} if not connected."),
+        },
+        tags=["Tip / Stripe Connect"],
+    )
+    def get(self, request):
+        try:
+            details = services.get_connect_account_details(request.user)
+        except stripe.error.StripeError as exc:
+            logger.error("Stripe error fetching account details: %s", str(exc))
+            return Response(
+                {"detail": "Couldn't load your payout account from Stripe. Please try again."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        if details is None:
+            return Response({"is_connect": False}, status=status.HTTP_200_OK)
+        return Response({"is_connect": True, **details}, status=status.HTTP_200_OK)
+
+
+class ConnectDashboardLinkView(APIView):
+    """
+    POST /tip/connect/dashboard/
+    A one-time link to the user's Stripe Express dashboard.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Get Stripe Express dashboard link",
+        responses={200: OpenApiResponse(description="{'url': ...}")},
+        tags=["Tip / Stripe Connect"],
+    )
+    def post(self, request):
+        connect = getattr(request.user, "stripe_connect_account", None)
+        if connect is None or connect.needs_reconnect or not connect.is_onboarding_complete:
+            return Response(
+                {"detail": "Finish setting up payouts first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            url = services.create_dashboard_link(request.user)
+        except stripe.error.StripeError as exc:
+            logger.error("Stripe error creating dashboard link: %s", str(exc))
+            return Response(
+                {"detail": "Couldn't open Stripe right now. Please try again."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response({"url": url}, status=status.HTTP_200_OK)
+
+
 class OnboardBridgeView(APIView):
     """
     GET /tip/onboard/bridge/?status=return|refresh

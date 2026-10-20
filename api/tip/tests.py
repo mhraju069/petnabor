@@ -1636,3 +1636,63 @@ class ConnectAccountNeverDeletedTests(TestCase):
         self.connect.refresh_from_db()
         self.assertFalse(self.connect.needs_reconnect)
         self.assertTrue(self.connect.is_fully_verified)
+
+
+class ConnectDetailsTests(TestCase):
+    """Payout account screen: what Stripe has on file, and the dashboard link."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = make_user("pd_user@test.com")
+        self.client.force_authenticate(user=self.user)
+
+    def test_not_connected(self):
+        response = self.client.get(reverse("tip:connect-details"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {"is_connect": False})
+
+    @patch("stripe.Account.retrieve")
+    def test_shows_bank_last4_and_schedule(self, retrieve):
+        make_connect_account(self.user)
+        retrieve.return_value = {
+            "email": "sitter@test.com",
+            "country": "US",
+            "default_currency": "usd",
+            "external_accounts": {"data": [
+                {"object": "bank_account", "bank_name": "STRIPE TEST BANK", "last4": "6789",
+                 "currency": "usd", "default_for_currency": True},
+            ]},
+            "settings": {"payouts": {"schedule": {"interval": "daily"}}},
+            "requirements": {"currently_due": [], "past_due": [], "disabled_reason": None},
+        }
+        response = self.client.get(reverse("tip:connect-details"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["is_connect"])
+        self.assertEqual(response.data["bank"]["last4"], "6789")
+        self.assertEqual(response.data["default_currency"], "USD")
+        self.assertEqual(response.data["payout_schedule"], "Daily")
+        self.assertEqual(response.data["requirements_due"], 0)
+
+    @patch("stripe.Account.retrieve")
+    def test_reconnect_needed_skips_stripe(self, retrieve):
+        connect = make_connect_account(self.user)
+        connect.needs_reconnect = True
+        connect.save()
+        response = self.client.get(reverse("tip:connect-details"))
+        self.assertTrue(response.data["needs_reconnect"])
+        retrieve.assert_not_called()
+
+    @patch("stripe.Account.create_login_link")
+    def test_dashboard_link(self, create_login_link):
+        connect = make_connect_account(self.user)
+        create_login_link.return_value = MagicMock(url="https://connect.stripe.com/express/x")
+        response = self.client.post(reverse("tip:connect-dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["url"], "https://connect.stripe.com/express/x")
+        create_login_link.assert_called_once_with(connect.stripe_account_id)
+
+    def test_dashboard_link_needs_finished_setup(self):
+        make_connect_account(self.user, verified=False)
+        response = self.client.post(reverse("tip:connect-dashboard"))
+        self.assertEqual(response.status_code, 400)

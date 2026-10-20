@@ -6,6 +6,8 @@ from django.urls import path
 from .views import (
     ConnectOnboardView,
     ConnectStatusView,
+    ConnectDetailsView,
+    ConnectDashboardLinkView,
     SendTipView,
     TipHistoryView,
     TipBalanceView,
@@ -22,6 +24,8 @@ urlpatterns = [
     # Stripe Connect onboarding
     path("connect/onboard/", ConnectOnboardView.as_view(), name="connect-onboard"),
     path("connect/status/", ConnectStatusView.as_view(), name="connect-status"),
+    path("connect/details/", ConnectDetailsView.as_view(), name="connect-details"),
+    path("connect/dashboard/", ConnectDashboardLinkView.as_view(), name="connect-dashboard"),
     path("onboard/bridge/", OnboardBridgeView.as_view(), name="onboard-bridge"),
 
     # Tipping
