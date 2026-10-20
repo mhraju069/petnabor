@@ -838,6 +838,9 @@ TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# A tip held for a recipient who hasn't set up payouts is refunded to the
+# tipper after this many days (api.tip.services.expire_held_tips).
+HELD_TIP_EXPIRY_DAYS = int(os.getenv("HELD_TIP_EXPIRY_DAYS", "30"))
 
 # Base URL for Stripe Connect redirect URLs
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://petnabor.com")

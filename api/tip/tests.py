@@ -1374,3 +1374,255 @@ class HoldAndReleaseTests(TestCase):
         )
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["status"], "held")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Payment safety fixes (bridge XSS, held tips, minimum, webhook retries,
+# refunds/disputes, never deleting Connect accounts)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class OnboardBridgeSafetyTests(TestCase):
+    """Fix 1: the bridge page only accepts return/refresh (no reflected XSS)."""
+
+    def test_unknown_status_is_ignored(self):
+        payload = '";alert(document.cookie)//<script>x</script>'
+        response = self.client.get(reverse("tip:onboard-bridge"), {"status": payload})
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertNotIn("alert(document.cookie)", body)
+        self.assertNotIn("<script>x", body)
+        self.assertIn("tip/onboard/return", body)
+
+    def test_refresh_still_works(self):
+        response = self.client.get(reverse("tip:onboard-bridge"), {"status": "refresh"})
+        self.assertIn("tip/onboard/refresh", response.content.decode())
+
+
+class MinimumTipDefaultTests(TestCase):
+    """Fix 3: the default minimum covers Stripe's fee."""
+
+    def test_default_minimum_is_three_dollars(self):
+        TipSettings.objects.all().delete()
+        self.assertEqual(TipSettings.get_instance().minimum_tip_amount, Decimal("3.00"))
+
+
+class WebhookRetryTests(TestCase):
+    """Fix 4: a failing handler answers 500 so Stripe retries."""
+
+    @patch("api.tip.services.handle_payment_intent_succeeded", side_effect=RuntimeError("db hiccup"))
+    @patch("api.tip.services.construct_stripe_event")
+    def test_handler_error_returns_500(self, mock_construct, _handler):
+        mock_construct.return_value = {
+            "id": "evt_retry", "type": "payment_intent.succeeded", "data": {"object": {"id": "pi_x"}},
+        }
+        response = self.client.post(
+            reverse("tip:stripe-webhook"), data=b"{}", content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="t=1,v1=sig",
+        )
+        self.assertEqual(response.status_code, 500)
+
+
+class RefundTipTests(TestCase):
+    """Fix 5: refunds take the money back from the recipient too."""
+
+    def setUp(self):
+        self.tipper = make_user("rf_tipper@test.com")
+        self.recipient = make_user("rf_recipient@test.com")
+        self.connect = make_connect_account(self.recipient)
+
+    @patch("stripe.Refund.create")
+    def test_direct_tip_refund_reverses_transfer_and_fee(self, refund_create):
+        tip = make_tip(self.tipper, self.recipient, status=TipStatus.SUCCEEDED)
+        tip.stripe_charge_id = "ch_direct"
+        tip.save()
+
+        services.refund_tip(tip)
+
+        kwargs = refund_create.call_args.kwargs
+        self.assertEqual(kwargs["charge"], "ch_direct")
+        self.assertTrue(kwargs["reverse_transfer"])
+        self.assertTrue(kwargs["refund_application_fee"])
+        tip.refresh_from_db()
+        self.assertEqual(tip.status, TipStatus.REFUNDED)
+
+    @patch("stripe.Refund.create")
+    @patch("stripe.Transfer.create_reversal")
+    def test_released_held_tip_reverses_our_transfer_first(self, create_reversal, refund_create):
+        tip = make_tip(self.tipper, self.recipient, status=TipStatus.SUCCEEDED)
+        tip.stripe_charge_id = "ch_held"
+        tip.stripe_transfer_id = "tr_released"
+        tip.save()
+
+        services.refund_tip(tip)
+
+        self.assertEqual(create_reversal.call_args.args[0], "tr_released")
+        self.assertNotIn("reverse_transfer", refund_create.call_args.kwargs)
+
+    @patch("stripe.Refund.create")
+    def test_held_paid_tip_is_plain_refund(self, refund_create):
+        tip = make_tip(self.tipper, self.recipient, status=TipStatus.HELD)
+        tip.stripe_charge_id = "ch_on_platform"
+        tip.save()
+
+        services.refund_tip(tip)
+
+        self.assertNotIn("reverse_transfer", refund_create.call_args.kwargs)
+        tip.refresh_from_db()
+        self.assertEqual(tip.status, TipStatus.REFUNDED)
+
+    def test_failed_tip_cannot_be_refunded(self):
+        tip = make_tip(self.tipper, self.recipient, status=TipStatus.FAILED)
+        with self.assertRaises(services.RefundError):
+            services.refund_tip(tip)
+
+    def test_partial_refund_keeps_status(self):
+        tip = make_tip(self.tipper, self.recipient, status=TipStatus.SUCCEEDED)
+        tip.stripe_charge_id = "ch_partial"
+        tip.save()
+        services.handle_charge_refunded(
+            {"id": "ch_partial", "refunded": False, "amount_refunded": 500, "amount": 2000}
+        )
+        tip.refresh_from_db()
+        self.assertEqual(tip.status, TipStatus.SUCCEEDED)
+
+
+class DisputeTests(TestCase):
+    """Fix 5: chargebacks pull the recipient's share back; a win restores it."""
+
+    def setUp(self):
+        self.tipper = make_user("dp_tipper@test.com")
+        self.recipient = make_user("dp_recipient@test.com")
+        self.connect = make_connect_account(self.recipient)
+        self.tip = make_tip(self.tipper, self.recipient, status=TipStatus.SUCCEEDED)
+        self.tip.stripe_charge_id = "ch_disputed"
+        self.tip.save()
+
+    @patch("stripe.Transfer.create_reversal")
+    @patch("stripe.Charge.retrieve", return_value={"transfer": "tr_auto"})
+    def test_dispute_created_reverses_recipient_share(self, _charge, create_reversal):
+        services.handle_dispute_created({"id": "dp_1", "charge": "ch_disputed", "reason": "fraudulent"})
+
+        self.tip.refresh_from_db()
+        self.assertEqual(self.tip.status, TipStatus.DISPUTED)
+        self.assertEqual(self.tip.status_before_dispute, TipStatus.SUCCEEDED)
+        self.assertTrue(self.tip.funds_reversed)
+        self.assertEqual(create_reversal.call_args.args[0], "tr_auto")
+        self.assertEqual(create_reversal.call_args.kwargs["amount"], int(self.tip.recipient_amount * 100))
+
+    @patch("stripe.Transfer.create")
+    @patch("stripe.Transfer.create_reversal")
+    @patch("stripe.Charge.retrieve", return_value={"transfer": "tr_auto"})
+    def test_dispute_won_pays_recipient_again(self, _charge, _reversal, transfer_create):
+        services.handle_dispute_created({"id": "dp_2", "charge": "ch_disputed"})
+        services.handle_dispute_closed({"id": "dp_2", "charge": "ch_disputed", "status": "won"})
+
+        self.tip.refresh_from_db()
+        self.assertEqual(self.tip.status, TipStatus.SUCCEEDED)
+        self.assertFalse(self.tip.funds_reversed)
+        self.assertEqual(transfer_create.call_args.kwargs["destination"], self.connect.stripe_account_id)
+
+    @patch("stripe.Transfer.create_reversal")
+    @patch("stripe.Charge.retrieve", return_value={"transfer": "tr_auto"})
+    def test_dispute_lost_ends_refunded(self, _charge, _reversal):
+        services.handle_dispute_created({"id": "dp_3", "charge": "ch_disputed"})
+        services.handle_dispute_closed({"id": "dp_3", "charge": "ch_disputed", "status": "lost"})
+        self.tip.refresh_from_db()
+        self.assertEqual(self.tip.status, TipStatus.REFUNDED)
+
+    def test_held_tip_dispute_needs_no_reversal(self):
+        self.tip.status = TipStatus.HELD
+        self.tip.save()
+        with patch("stripe.Transfer.create_reversal") as create_reversal:
+            services.handle_dispute_created({"id": "dp_4", "charge": "ch_disputed"})
+            create_reversal.assert_not_called()
+        services.handle_dispute_closed({"id": "dp_4", "charge": "ch_disputed", "status": "won"})
+        self.tip.refresh_from_db()
+        self.assertEqual(self.tip.status, TipStatus.HELD)  # back to waiting for payouts
+
+
+class HeldTipExpiryTests(TestCase):
+    """Fix 2: held tips don't wait forever."""
+
+    def setUp(self):
+        self.tipper = make_user("ex_tipper@test.com")
+        self.recipient = make_user("ex_recipient@test.com")
+
+    def _held(self, days_old, paid=True):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        tip = make_tip(self.tipper, self.recipient, status=TipStatus.HELD)
+        if paid:
+            tip.stripe_charge_id = f"ch_{uuid.uuid4().hex[:10]}"
+            tip.save()
+        Tip.objects.filter(pk=tip.pk).update(created_at=timezone.now() - timedelta(days=days_old))
+        return tip
+
+    @override_settings(HELD_TIP_EXPIRY_DAYS=30)
+    @patch("stripe.PaymentIntent.cancel")
+    @patch("stripe.Refund.create")
+    def test_old_paid_refunded_abandoned_cancelled_recent_kept(self, refund_create, pi_cancel):
+        old = self._held(31)
+        recent = self._held(5)
+        abandoned = self._held(2, paid=False)
+
+        refunded, cancelled = services.expire_held_tips()
+
+        self.assertEqual((refunded, cancelled), (1, 1))
+        for tip in (old, recent, abandoned):
+            tip.refresh_from_db()
+        self.assertEqual(old.status, TipStatus.REFUNDED)
+        self.assertEqual(recent.status, TipStatus.HELD)
+        self.assertEqual(abandoned.status, TipStatus.CANCELLED)
+        pi_cancel.assert_called_once_with(abandoned.stripe_payment_intent_id)
+
+    @patch("api.tip.services.get_full_balance_summary", return_value={
+        "available_balance": Decimal("0"), "pending_balance": Decimal("0"), "held_amount": Decimal("16.00"),
+    })
+    @patch("stripe.Refund.create")
+    def test_account_deletion_refunds_held_tips_instead_of_blocking(self, refund_create, _balance):
+        from api.users.account_deletion import delete_account
+
+        tip = self._held(3)
+        delete_account(self.recipient)
+
+        self.assertFalse(User.objects.filter(pk=self.recipient.pk).exists())
+        tip.refresh_from_db()
+        self.assertEqual(tip.status, TipStatus.REFUNDED)
+        refund_create.assert_called_once()
+
+
+class ConnectAccountNeverDeletedTests(TestCase):
+    """Fix 6: Stripe errors mark the account for reconnection, never delete it."""
+
+    def setUp(self):
+        self.user = make_user("cn_user@test.com")
+        self.connect = make_connect_account(self.user)
+
+    @patch("stripe.Account.retrieve")
+    def test_gone_account_is_marked_not_deleted(self, retrieve):
+        import stripe
+
+        retrieve.side_effect = stripe.error.PermissionError(
+            "The provided key does not have access to account 'acct_x' (or that account does not exist)."
+        )
+        result = services.get_connect_account_status(self.user)
+
+        self.assertIsNotNone(result)
+        self.connect.refresh_from_db()  # still there
+        self.assertTrue(self.connect.needs_reconnect)
+        self.assertFalse(self.connect.is_fully_verified)
+
+    @patch("stripe.Account.retrieve")
+    def test_other_errors_are_raised_and_change_nothing(self, retrieve):
+        import stripe
+
+        retrieve.side_effect = stripe.error.InvalidRequestError("Something about the platform settings", None)
+        with self.assertRaises(stripe.error.InvalidRequestError):
+            services.get_connect_account_status(self.user)
+
+        self.connect.refresh_from_db()
+        self.assertFalse(self.connect.needs_reconnect)
+        self.assertTrue(self.connect.is_fully_verified)

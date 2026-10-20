@@ -42,6 +42,7 @@ class StripeConnectAccountSerializer(serializers.ModelSerializer):
             "is_charges_enabled",
             "is_payouts_enabled",
             "is_fully_verified",
+            "needs_reconnect",
             "created_at",
             "updated_at",
         ]

@@ -12,9 +12,13 @@ Kept, without a link to the person:
     records the other party and accounting rely on;
   - chat messages already delivered to other people (sender becomes null).
 
-Deletion is refused while the user still has money in the app (an
-available, pending or held tip balance, or a payout in progress): they
+Deletion is refused while the user still has money in their own Stripe
+account (an available or pending balance, or a payout in progress): they
 must withdraw first, or it would be lost.
+
+Tips still HELD for them (they never set up payouts, so they can't
+withdraw them) don't block deletion: they're refunded to the people who
+sent them first. If a refund fails, the deletion stops.
 """
 
 import logging
@@ -41,11 +45,8 @@ def _money_left(user) -> Decimal:
             "You have a payout in progress. Please wait until it's paid, then try again."
         )
     summary = get_full_balance_summary(user)
-    return (
-        summary.get("available_balance", Decimal("0"))
-        + summary.get("pending_balance", Decimal("0"))
-        + summary.get("held_amount", Decimal("0"))
-    )
+    # Not held_amount: held tips are refunded to their senders on deletion.
+    return summary.get("available_balance", Decimal("0")) + summary.get("pending_balance", Decimal("0"))
 
 
 def delete_account(user) -> None:
@@ -53,6 +54,15 @@ def delete_account(user) -> None:
     if remaining > 0:
         raise AccountDeletionBlocked(
             f"You still have ${remaining:.2f} in tips. Please withdraw it before deleting your account."
+        )
+
+    from api.tip.services import RefundError, refund_held_tips_for
+
+    try:
+        refund_held_tips_for(user)
+    except RefundError:
+        raise AccountDeletionBlocked(
+            "We couldn't return the tips waiting for you to their senders. Please try again later."
         )
 
     user_id, firebase_uid = user.id, user.firebase_uid

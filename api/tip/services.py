@@ -30,6 +30,46 @@ def _stripe():
     return stripe
 
 
+# Stripe's wording when a connected account is gone or not reachable with our
+# key (deleted, disconnected, or test vs live mix-up).
+_ACCOUNT_GONE_MARKERS = (
+    "no such account",
+    "no such destination",
+    "does not have access to account",
+    "account does not exist",
+)
+
+
+def _account_unusable(exc) -> bool:
+    """True only for "this connected account is gone / not ours" errors."""
+    if getattr(exc, "code", None) == "account_invalid":
+        return True
+    message = str(exc).lower()
+    return any(marker in message for marker in _ACCOUNT_GONE_MARKERS)
+
+
+def _mark_needs_reconnect(connect, exc) -> None:
+    """
+    Stripe can't use this account any more. Keep the row (it links the user
+    to any money there) -- never delete it -- and stop sending money to it;
+    the user re-onboards to replace it (create_connect_account).
+    """
+    logger.error(
+        "Stripe Connect account %s for user %s is unusable -- marked needs_reconnect: %s",
+        connect.stripe_account_id, connect.user_id, exc,
+    )
+    connect.needs_reconnect = True
+    connect.is_charges_enabled = False
+    connect.is_payouts_enabled = False
+    connect.is_onboarding_complete = False
+    connect.save(
+        update_fields=[
+            "needs_reconnect", "is_charges_enabled", "is_payouts_enabled",
+            "is_onboarding_complete", "updated_at",
+        ]
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Stripe Connect — Onboarding
 # ──────────────────────────────────────────────────────────────────────────────
@@ -45,20 +85,18 @@ def create_connect_account(user):
     """
     s = _stripe()
 
+    existing = None
     try:
-        connect = user.stripe_connect_account
+        existing = user.stripe_connect_account
         try:
-            onboarding_url = _get_account_link(connect.stripe_account_id)
-            return connect, onboarding_url
-        except stripe.error.InvalidRequestError as exc:
-            if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
-                logger.warning("Stripe Connect account %s invalid/unlinked during onboarding. Auto-deleting.", connect.stripe_account_id)
-                connect.delete()
-            else:
+            onboarding_url = _get_account_link(existing.stripe_account_id)
+            return existing, onboarding_url
+        except (stripe.error.InvalidRequestError, stripe.error.PermissionError) as exc:
+            if not _account_unusable(exc):
                 raise
-        except stripe.error.PermissionError as exc:
-            logger.warning("Stripe Connect account %s permission denied during onboarding. Auto-deleting.", connect.stripe_account_id)
-            connect.delete()
+            # The user asked to (re)connect and Stripe says the old account is
+            # gone: give them a new one below, on the same row.
+            _mark_needs_reconnect(existing, exc)
     except StripeConnectAccount.DoesNotExist:
         pass
 
@@ -91,10 +129,20 @@ def create_connect_account(user):
 
     account = s.Account.create(**account_params)
 
-    connect = StripeConnectAccount.objects.create(
-        user=user,
-        stripe_account_id=account.id,
-    )
+    if existing is not None:
+        logger.warning(
+            "Replacing unusable Stripe account %s with %s for user %s",
+            existing.stripe_account_id, account.id, user.id,
+        )
+        existing.stripe_account_id = account.id
+        existing.needs_reconnect = False
+        existing.save(update_fields=["stripe_account_id", "needs_reconnect", "updated_at"])
+        connect = existing
+    else:
+        connect = StripeConnectAccount.objects.create(
+            user=user,
+            stripe_account_id=account.id,
+        )
 
     onboarding_url = _get_account_link(account.id)
     return connect, onboarding_url
@@ -126,14 +174,11 @@ def refresh_onboarding_link(user):
     connect = user.stripe_connect_account
     try:
         return _get_account_link(connect.stripe_account_id)
-    except stripe.error.InvalidRequestError as exc:
-        if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
-            connect.delete()
-            raise StripeConnectAccount.DoesNotExist
-        raise
-    except stripe.error.PermissionError as exc:
-        connect.delete()
-        raise StripeConnectAccount.DoesNotExist
+    except (stripe.error.InvalidRequestError, stripe.error.PermissionError) as exc:
+        if not _account_unusable(exc):
+            raise
+        # Old account gone: onboard onto a fresh one (same row).
+        return create_connect_account(user)[1]
 
 
 def get_connect_account_status(user):
@@ -154,17 +199,13 @@ def get_connect_account_status(user):
 
     try:
         account = s.Account.retrieve(connect.stripe_account_id)
-    except stripe.error.InvalidRequestError as exc:
-        if "platform" in str(exc).lower() or "no such destination" in str(exc).lower() or "does not exist" in str(exc).lower():
-            logger.warning("Stripe Connect account %s invalid/unlinked during status fetch. Auto-deleting.", connect.stripe_account_id)
-            connect.delete()
-            return None
-        raise
-    except stripe.error.PermissionError as exc:
-        logger.warning("Stripe Connect account %s permission denied during status fetch. Auto-deleting.", connect.stripe_account_id)
-        connect.delete()
-        return None
+    except (stripe.error.InvalidRequestError, stripe.error.PermissionError) as exc:
+        if not _account_unusable(exc):
+            raise
+        _mark_needs_reconnect(connect, exc)
+        return connect
 
+    connect.needs_reconnect = False
     connect.is_charges_enabled = account.charges_enabled
     connect.is_payouts_enabled = account.payouts_enabled
     connect.is_onboarding_complete = (
@@ -172,6 +213,7 @@ def get_connect_account_status(user):
     )
     connect.save(
         update_fields=[
+            "needs_reconnect",
             "is_charges_enabled",
             "is_payouts_enabled",
             "is_onboarding_complete",
@@ -267,16 +309,11 @@ def create_tip_payment_intent(
             intent_kwargs["metadata"]["flow"] = "direct"
             intent = s.PaymentIntent.create(**intent_kwargs)
             tip_status = TipStatus.PENDING
-        except stripe.error.InvalidRequestError as exc:
-            if "no such destination" in str(exc).lower() or "platform" in str(exc).lower() or "does not exist" in str(exc).lower():
-                logger.warning("Recipient Stripe Connect account %s invalid. Auto-deleting and falling back to HELD.", connect.stripe_account_id)
-                connect.delete()
-                has_verified_account = False
-            else:
+        except (stripe.error.InvalidRequestError, stripe.error.PermissionError) as exc:
+            if not _account_unusable(exc):
                 raise
-        except stripe.error.PermissionError as exc:
-            logger.warning("Recipient Stripe Connect account %s permission denied. Auto-deleting and falling back to HELD.", connect.stripe_account_id)
-            connect.delete()
+            # Recipient's account is gone: hold the tip until they reconnect.
+            _mark_needs_reconnect(connect, exc)
             has_verified_account = False
 
     if not has_verified_account:
@@ -454,7 +491,10 @@ def handle_payment_intent_succeeded(payment_intent):
             logger.warning("Webhook: Tip not found for payment_intent %s", pi_id)
             return
 
-        if tip.status in (TipStatus.SUCCEEDED, TipStatus.FAILED, TipStatus.REFUNDED):
+        if tip.status in (
+            TipStatus.SUCCEEDED, TipStatus.FAILED, TipStatus.REFUNDED,
+            TipStatus.CANCELLED, TipStatus.DISPUTED,
+        ):
             logger.info("Webhook: Tip %s already %s — skipping", tip.id, tip.status)
             return
 
@@ -562,7 +602,10 @@ def handle_payment_intent_failed(payment_intent):
             logger.warning("Webhook: Tip not found for failed payment_intent %s", pi_id)
             return
 
-        if tip.status in (TipStatus.SUCCEEDED, TipStatus.FAILED, TipStatus.REFUNDED):
+        if tip.status in (
+            TipStatus.SUCCEEDED, TipStatus.FAILED, TipStatus.REFUNDED,
+            TipStatus.CANCELLED, TipStatus.DISPUTED,
+        ):
             logger.info("Webhook: Tip %s already %s — skipping", tip.id, tip.status)
             return
 
@@ -595,14 +638,29 @@ def handle_payment_intent_cancelled(payment_intent):
         except Tip.DoesNotExist:
             return
 
+        # Only a tip still waiting for payment can be cancelled.
+        if tip.status not in (TipStatus.PENDING, TipStatus.HELD):
+            return
+        if tip.status == TipStatus.HELD and tip.stripe_charge_id:
+            return
+
         tip.status = TipStatus.CANCELLED
         tip.save(update_fields=["status", "updated_at"])
 
 
 def handle_charge_refunded(charge):
-    """Mark the tip as refunded when the charge is refunded."""
+    """Mark the tip as refunded when the charge is FULLY refunded."""
     charge_id = charge["id"]
     pi_id = charge.get("payment_intent")
+
+    # charge.refunded also fires for partial refunds; those don't make the
+    # whole tip "refunded".
+    if charge.get("refunded") is False:
+        logger.info(
+            "Partial refund on charge %s (%s of %s cents) -- tip status unchanged",
+            charge_id, charge.get("amount_refunded"), charge.get("amount"),
+        )
+        return
 
     with transaction.atomic():
         tip = None
@@ -659,6 +717,7 @@ def handle_account_updated(account):
 
     was_charges_enabled = connect.is_charges_enabled
 
+    connect.needs_reconnect = False
     connect.is_charges_enabled = account.get("charges_enabled", False)
     connect.is_payouts_enabled = account.get("payouts_enabled", False)
     connect.is_onboarding_complete = (
@@ -666,6 +725,7 @@ def handle_account_updated(account):
     )
     connect.save(
         update_fields=[
+            "needs_reconnect",
             "is_charges_enabled",
             "is_payouts_enabled",
             "is_onboarding_complete",
@@ -738,6 +798,260 @@ def handle_payout_failed(payout):
             payout_id,
             failure_msg,
         )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Refunds (admin action, expired held tips, account deletion)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class RefundError(Exception):
+    """A refund couldn't be done (wrong state, or Stripe refused)."""
+
+
+def refund_tip(tip, *, reason="requested_by_customer", notify_body=None):
+    """
+    Give the tipper their money back -- and take it back from the recipient
+    if they already got it, plus the platform fee, so the platform doesn't
+    pay for it:
+
+      - held, never paid:          cancel the PaymentIntent (nothing charged)
+      - held, paid, not released:  refund (money is still on the platform)
+      - held, then released:       reverse the transfer, then refund
+      - direct (destination):      refund with reverse_transfer + fee refund
+
+    The charge.refunded webhook arrives later and is a no-op by then.
+    """
+    s = _stripe()
+    if tip.status not in (TipStatus.HELD, TipStatus.SUCCEEDED):
+        raise RefundError(f"A {tip.get_status_display().lower()} tip can't be refunded.")
+
+    try:
+        if tip.status == TipStatus.HELD and not tip.stripe_charge_id:
+            if tip.stripe_payment_intent_id:
+                s.PaymentIntent.cancel(tip.stripe_payment_intent_id)
+            new_status = TipStatus.CANCELLED
+        else:
+            if not tip.stripe_charge_id:
+                raise RefundError("This tip has no charge to refund.")
+            key = f"tip_refund_{tip.id}"
+            if tip.status == TipStatus.HELD:
+                s.Refund.create(charge=tip.stripe_charge_id, reason=reason, idempotency_key=key)
+            elif tip.stripe_transfer_id:
+                s.Transfer.create_reversal(
+                    tip.stripe_transfer_id, idempotency_key=f"tip_reversal_{tip.id}"
+                )
+                s.Refund.create(charge=tip.stripe_charge_id, reason=reason, idempotency_key=key)
+            else:
+                s.Refund.create(
+                    charge=tip.stripe_charge_id,
+                    reason=reason,
+                    reverse_transfer=True,
+                    refund_application_fee=True,
+                    idempotency_key=key,
+                )
+            new_status = TipStatus.REFUNDED
+    except stripe.error.StripeError as exc:
+        logger.error("Refund of tip %s failed: %s", tip.id, exc)
+        raise RefundError(str(getattr(exc, "user_message", None) or exc)) from exc
+
+    tip.status = new_status
+    tip.save(update_fields=["status", "updated_at"])
+    logger.info("Tip %s %s (%s)", tip.id, new_status, reason)
+
+    if new_status == TipStatus.REFUNDED and tip.tipper_id:
+        try:
+            send_notification(
+                title="Tip refunded",
+                body=notify_body or (
+                    f"Your ${tip.amount:.2f} tip has been refunded and will appear in your "
+                    "account within 5-10 business days."
+                ),
+                user_id=tip.tipper_id,
+                notification_type=NotificationTypes.TIP_SENT,
+                actor=tip.recipient,
+                data={"tip_id": str(tip.id), "status": "refunded"},
+            )
+        except Exception as exc:
+            logger.warning("Notification failed after refunding tip %s: %s", tip.id, exc)
+    return tip
+
+
+def expire_held_tips(now=None):
+    """
+    Held tips don't wait forever for the recipient to connect payouts:
+      - paid but unclaimed for HELD_TIP_EXPIRY_DAYS -> refunded to the tipper
+      - never paid (payment sheet abandoned) for a day -> cancelled
+    Returns (refunded, cancelled) counts. Daily Celery task.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    now = now or timezone.now()
+    days = getattr(settings, "HELD_TIP_EXPIRY_DAYS", 30)
+    refunded = cancelled = 0
+
+    unpaid = Tip.objects.filter(
+        status=TipStatus.HELD, stripe_charge_id__isnull=True,
+        created_at__lt=now - timedelta(days=1),
+    )
+    for tip in unpaid:
+        try:
+            refund_tip(tip, reason="requested_by_customer")
+            cancelled += 1
+        except RefundError as exc:
+            logger.warning("Couldn't cancel abandoned held tip %s: %s", tip.id, exc)
+
+    expired = Tip.objects.filter(
+        status=TipStatus.HELD, stripe_charge_id__isnull=False,
+        created_at__lt=now - timedelta(days=days),
+    ).select_related("tipper", "recipient")
+    for tip in expired:
+        recipient_name = (tip.recipient.first_name if tip.recipient else "") or "The recipient"
+        try:
+            refund_tip(
+                tip,
+                notify_body=(
+                    f"{recipient_name} didn't set up payouts within {days} days, so your "
+                    f"${tip.amount:.2f} tip was refunded. It will appear in 5-10 business days."
+                ),
+            )
+            refunded += 1
+        except RefundError as exc:
+            logger.error("Couldn't refund expired held tip %s: %s", tip.id, exc)
+            continue
+        if tip.recipient_id:
+            try:
+                send_notification(
+                    title="A tip expired",
+                    body=(
+                        f"A ${tip.recipient_amount:.2f} tip waited {days} days for you to set up "
+                        "payouts, so it was returned to the sender."
+                    ),
+                    user_id=tip.recipient_id,
+                    notification_type=NotificationTypes.TIP_RECEIVED,
+                    actor=tip.tipper,
+                    data={"tip_id": str(tip.id), "status": "expired"},
+                )
+            except Exception as exc:
+                logger.warning("Notification failed for expired tip %s: %s", tip.id, exc)
+
+    if refunded or cancelled:
+        logger.info("Held tips: %d refunded (expired), %d cancelled (unpaid)", refunded, cancelled)
+    return refunded, cancelled
+
+
+def refund_held_tips_for(user):
+    """
+    Before deleting an account: return every tip still held for this user
+    to its sender. Raises RefundError if any can't be refunded (so the
+    deletion stops rather than strand the money).
+    """
+    held = Tip.objects.filter(recipient=user, status=TipStatus.HELD).select_related("tipper")
+    for tip in held:
+        refund_tip(
+            tip,
+            notify_body=(
+                f"The account your ${tip.amount:.2f} tip was waiting for was closed, so the "
+                "tip was refunded. It will appear in 5-10 business days."
+            ),
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Disputes (chargebacks)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _tip_for_charge(charge_id, for_update=True):
+    qs = Tip.objects.select_for_update() if for_update else Tip.objects
+    return qs.filter(stripe_charge_id=charge_id).first()
+
+
+def handle_dispute_created(dispute):
+    """
+    A tipper disputed the charge. With these charges the PLATFORM pays the
+    chargeback, so pull the recipient's share back from their account
+    (reversed if we win -- handle_dispute_closed).
+    """
+    s = _stripe()
+    charge_id = dispute.get("charge")
+    with transaction.atomic():
+        tip = _tip_for_charge(charge_id)
+        if tip is None:
+            logger.warning("Dispute %s: no tip for charge %s", dispute.get("id"), charge_id)
+            return
+        if tip.status == TipStatus.DISPUTED:
+            return  # already handled (webhook retry)
+
+        tip.status_before_dispute = tip.status
+        tip.stripe_dispute_id = dispute.get("id")
+        tip.status = TipStatus.DISPUTED
+
+        if tip.status_before_dispute == TipStatus.SUCCEEDED:
+            # Where the recipient's money came from: our own transfer
+            # (held, then released) or the charge's automatic transfer.
+            transfer_id = tip.stripe_transfer_id
+            try:
+                if not transfer_id:
+                    transfer_id = s.Charge.retrieve(charge_id).get("transfer")
+                if transfer_id:
+                    s.Transfer.create_reversal(
+                        transfer_id,
+                        amount=int(tip.recipient_amount * 100),
+                        idempotency_key=f"tip_dispute_reversal_{tip.id}",
+                    )
+                    tip.funds_reversed = True
+            except stripe.error.StripeError as exc:
+                # e.g. the recipient already withdrew it: the platform covers it.
+                logger.error(
+                    "Dispute on tip %s: couldn't pull back the recipient's $%s: %s",
+                    tip.id, tip.recipient_amount, exc,
+                )
+
+        tip.save(update_fields=[
+            "status", "status_before_dispute", "stripe_dispute_id", "funds_reversed", "updated_at",
+        ])
+    logger.warning(
+        "Tip %s DISPUTED (dispute %s, reason %s, recipient funds reversed: %s)",
+        tip.id, dispute.get("id"), dispute.get("reason"), tip.funds_reversed,
+    )
+
+
+def handle_dispute_closed(dispute):
+    """
+    Dispute decided. Won: the recipient gets their share back. Lost: the
+    tipper kept the money -- the tip ends as refunded.
+    """
+    s = _stripe()
+    outcome = dispute.get("status")
+    with transaction.atomic():
+        tip = _tip_for_charge(dispute.get("charge"))
+        if tip is None or tip.status != TipStatus.DISPUTED:
+            return
+
+        if outcome in ("won", "warning_closed"):
+            if tip.funds_reversed and tip.recipient_id:
+                connect = StripeConnectAccount.objects.filter(user_id=tip.recipient_id).first()
+                if connect and not connect.needs_reconnect:
+                    try:
+                        s.Transfer.create(
+                            amount=int(tip.recipient_amount * 100),
+                            currency=tip.currency,
+                            destination=connect.stripe_account_id,
+                            metadata={"tip_id": str(tip.id), "reason": "dispute_won"},
+                            idempotency_key=f"tip_dispute_won_{tip.id}",
+                        )
+                        tip.funds_reversed = False
+                    except stripe.error.StripeError as exc:
+                        logger.error("Dispute won but re-paying tip %s failed: %s", tip.id, exc)
+            tip.status = tip.status_before_dispute or TipStatus.SUCCEEDED
+        else:  # lost
+            tip.status = TipStatus.REFUNDED
+
+        tip.save(update_fields=["status", "funds_reversed", "updated_at"])
+    logger.warning("Dispute on tip %s closed: %s -> %s", tip.id, outcome, tip.status)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

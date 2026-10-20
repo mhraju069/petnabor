@@ -15,4 +15,9 @@ app.conf.beat_schedule = {
         "task": "api.story.tasks.delete_expired_stories",
         "schedule": 15 * 60,  # every 15 minutes
     },
+    # Held tips: refund after HELD_TIP_EXPIRY_DAYS, cancel abandoned unpaid ones.
+    "expire-held-tips": {
+        "task": "api.tip.tasks.expire_held_tips",
+        "schedule": 6 * 60 * 60,  # every 6 hours
+    },
 }

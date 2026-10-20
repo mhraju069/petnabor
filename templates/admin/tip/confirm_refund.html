@@ -1,0 +1,33 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<div class="max-w-2xl">
+  <h1 class="font-semibold text-xl mb-4">{{ title }}</h1>
+
+  <div class="border rounded-md p-4 mb-4 dark:border-gray-800">
+    <p class="mb-1"><strong>Tip:</strong> ${{ tip.amount }} · {{ tip.get_status_display }} · {{ tip.created_at|date:"M j, Y" }}</p>
+    <p class="mb-1"><strong>From:</strong> {{ tip.tipper.email|default:"(deleted user)" }}</p>
+    <p class="mb-1"><strong>To:</strong> {{ tip.recipient.email|default:"(deleted user)" }} (their share: ${{ tip.recipient_amount }})</p>
+    {% if tip.note %}<p class="mt-2 whitespace-pre-wrap">“{{ tip.note }}”</p>{% endif %}
+  </div>
+
+  <div class="border border-red-200 bg-red-50 text-red-700 rounded-md px-4 py-3 mb-6 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400">
+    {{ effect }}
+  </div>
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="flex gap-3">
+      {% if can_refund %}
+      <button type="submit" class="bg-red-600 text-white font-semibold px-4 py-2 rounded-md hover:bg-red-700">
+        {% translate "Yes, refund" %}
+      </button>
+      {% endif %}
+      <a href="{{ cancel_url }}" class="border px-4 py-2 rounded-md font-semibold dark:border-gray-700">
+        {% translate "Back" %}
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

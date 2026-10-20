@@ -115,11 +115,18 @@ class OnboardBridgeView(APIView):
 
     @extend_schema(exclude=True)
     def get(self, request):
+        from django.utils.html import escape
+
+        # Only the two values Stripe sends. The value used to go into the
+        # page's HTML and JavaScript as-is: a crafted link ran script on our
+        # domain (reflected XSS).
         status_param = request.query_params.get("status", "return")
+        if status_param not in ("return", "refresh"):
+            status_param = "return"
         frontend_base = getattr(settings, "FRONTEND_BASE_URL", "petnabor://")
 
         # Construct the deep link (e.g. petnabor://tip/onboard/return)
-        deep_link = f"{frontend_base}tip/onboard/{status_param}"
+        deep_link = escape(f"{frontend_base}tip/onboard/{status_param}")
 
         # Simple HTML redirect template
         html_content = f"""
@@ -526,6 +533,8 @@ class StripeWebhookView(APIView):
             "account.updated": services.handle_account_updated,
             "payout.paid": services.handle_payout_paid,
             "payout.failed": services.handle_payout_failed,
+            "charge.dispute.created": services.handle_dispute_created,
+            "charge.dispute.closed": services.handle_dispute_closed,
         }
 
         handler = HANDLERS.get(event_type)
@@ -539,8 +548,13 @@ class StripeWebhookView(APIView):
                     event.get("id"),
                     str(exc),
                 )
-                # Return 200 to prevent Stripe from retrying (we log and fix manually)
-                return Response({"detail": "Handler error logged."}, status=status.HTTP_200_OK)
+                # 500 so Stripe retries (for up to 3 days): the handlers are
+                # safe to run again. Answering 200 here silently lost events,
+                # e.g. a paid tip stuck as "pending" after a brief DB error.
+                return Response(
+                    {"detail": "Handler error; Stripe will retry."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
         else:
             logger.debug("Unhandled Stripe event type: %s", event_type)
 

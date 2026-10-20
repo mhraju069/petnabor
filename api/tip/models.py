@@ -36,8 +36,11 @@ class TipSettings(models.Model):
     minimum_tip_amount = models.DecimalField(
         max_digits=8,
         decimal_places=2,
-        default=Decimal("1.00"),
-        help_text="Minimum tip amount in USD.",
+        default=Decimal("3.00"),
+        help_text=(
+            "Minimum tip amount in USD. Stripe's card fee (2.9% + $0.30) is paid "
+            "by the platform, so with a 20% commission tips under ~$1.76 lose money."
+        ),
     )
     maximum_tip_amount = models.DecimalField(
         max_digits=8,
@@ -102,6 +105,14 @@ class StripeConnectAccount(models.Model):
         default=False,
         help_text="True when Stripe reports payouts_enabled on the account.",
     )
+    needs_reconnect = models.BooleanField(
+        default=False,
+        help_text=(
+            "Stripe says this account no longer exists or isn't accessible. Kept "
+            "(never deleted) so the link to the user's money isn't lost; the user "
+            "re-onboards to replace it."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -130,6 +141,7 @@ class TipStatus(models.TextChoices):
     FAILED = "failed", "Failed"
     REFUNDED = "refunded", "Refunded"
     CANCELLED = "cancelled", "Cancelled"
+    DISPUTED = "disputed", "Disputed (chargeback)"
 
 
 class Tip(models.Model):
@@ -213,6 +225,14 @@ class Tip(models.Model):
         choices=TipStatus.choices,
         default=TipStatus.PENDING,
         db_index=True,
+    )
+
+    # Chargebacks (charge.dispute.* webhooks).
+    stripe_dispute_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    status_before_dispute = models.CharField(max_length=20, blank=True, default="")
+    funds_reversed = models.BooleanField(
+        default=False,
+        help_text="The recipient's share was pulled back from their account during a dispute.",
     )
 
     # Optional note from the tipper
