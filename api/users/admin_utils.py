@@ -148,8 +148,12 @@ def dashboard_callback(request, context: dict) -> dict:
         .annotate(count=Count("id"))
         .order_by("day")
     )
-    reg_labels = [str(row["day"]) for row in registration_qs]
-    reg_data = [row["count"] for row in registration_qs]
+    # Every day of the last 30, including days with no sign-ups (otherwise
+    # the line skips them and quiet days are invisible).
+    by_day = {row["day"]: row["count"] for row in registration_qs}
+    days = [(now - timedelta(days=offset)).date() for offset in range(29, -1, -1)]
+    reg_labels = [day.strftime("%b %d") for day in days]
+    reg_data = [by_day.get(day, 0) for day in days]
 
     # ── User type distribution (for donut chart) ───────────────────────────────
     user_type_qs = (
@@ -195,6 +199,14 @@ def dashboard_callback(request, context: dict) -> dict:
     # ── Recent new users (activity feed) ──────────────────────────────────────
     recent_users = User.objects.order_by("-created_at").select_related("profile")[:10]
 
+    def admin_url(name: str, query: str = "") -> str:
+        from django.urls import NoReverseMatch, reverse
+
+        try:
+            return reverse(f"admin:{name}") + query
+        except NoReverseMatch:
+            return ""
+
     # ── Build context ──────────────────────────────────────────────────────────
     context.update(
         {
@@ -202,36 +214,42 @@ def dashboard_callback(request, context: dict) -> dict:
             "kpi_cards": [
                 {
                     "title": "Total Users",
+                    "url": admin_url("users_user_changelist"),
                     "metric": f"{total_users:,}",
                     "icon": "people",
                     "color": "purple",
                 },
                 {
                     "title": "Active Today",
+                    "url": admin_url("users_user_changelist"),
                     "metric": f"{active_today:,}",
                     "icon": "person_play",
                     "color": "green",
                 },
                 {
                     "title": "New this Week",
+                    "url": admin_url("users_user_changelist"),
                     "metric": f"{new_this_week:,}",
                     "icon": "person_add",
                     "color": "blue",
                 },
                 {
                     "title": "Total Posts",
+                    "url": admin_url("post_post_changelist"),
                     "metric": f"{total_posts:,}",
                     "icon": "article",
                     "color": "pink",
                 },
                 {
                     "title": "Total Pets",
+                    "url": admin_url("pet_petprofile_changelist"),
                     "metric": f"{total_pets:,}",
                     "icon": "pets",
                     "color": "orange",
                 },
                 {
                     "title": "Pending Reports",
+                    "url": admin_url("report_report_changelist", "?is_resolved__exact=0"),
                     "metric": f"{pending_reports:,}",
                     "icon": "flag",
                     "color": "red",
@@ -239,18 +257,21 @@ def dashboard_callback(request, context: dict) -> dict:
                 },
                 {
                     "title": "Total Vendors",
+                    "url": admin_url("vendor_vendor_changelist"),
                     "metric": f"{total_vendors:,}",
                     "icon": "storefront",
                     "color": "teal",
                 },
                 {
                     "title": "Total Products",
+                    "url": admin_url("product_product_changelist"),
                     "metric": f"{total_products:,}",
                     "icon": "inventory_2",
                     "color": "indigo",
                 },
                 {
                     "title": "Total Wishlists",
+                    "url": admin_url("wishlist_productwishlist_changelist"),
                     "metric": f"{total_wishlists:,}",
                     "icon": "favorite",
                     "color": "pink",
@@ -280,6 +301,15 @@ def dashboard_callback(request, context: dict) -> dict:
             "product_event_chart": {
                 "labels": pe_labels,
                 "data": pe_data,
+            },
+            # Same chart data as JSON for the template's charts (json_script —
+            # safe with any label text, unlike pasting Python lists into JS).
+            "dashboard_charts": {
+                "registrations": {"labels": reg_labels, "data": reg_data},
+                "user_types": {"labels": user_type_labels, "data": user_type_data},
+                "pet_types": {"labels": pet_labels, "data": pet_data},
+                "vendor_plans": {"labels": plan_labels, "data": plan_data},
+                "product_events": {"labels": pe_labels, "data": pe_data},
             },
             # Activity feed
             "recent_users": recent_users,

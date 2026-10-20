@@ -19,10 +19,40 @@ class MeetingViewSet(viewsets.ModelViewSet):
     serializer_class = MeetingSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = MeetingPagination
+    # No PUT/PATCH: status changes only through accept / cancel / complete
+    # (a raw edit let either person rewrite any field, e.g. status=COMPLETED).
+    http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_queryset(self):
         user = self.request.user
-        return Meeting.objects.filter(Q(sender=user) | Q(receiver=user))
+        qs = Meeting.objects.filter(Q(sender=user) | Q(receiver=user))
+        if self.action in ("list", "upcoming", "previous"):
+            # Meetings this person removed from their history.
+            qs = qs.exclude(hidden_for=user)
+        return qs
+
+    @staticmethod
+    def _is_previous(meeting) -> bool:
+        """Same rule as the Previous tab (see `previous`)."""
+        return meeting.visit_date < timezone.localdate() or meeting.status in ("CANCELLED", "COMPLETED")
+
+    @extend_schema(responses={204: None})
+    def destroy(self, request, *args, **kwargs):
+        """
+        DELETE /meetings/requests/{id}/ — remove a previous meeting from YOUR
+        history. The other person keeps it, and reviews stay. Upcoming
+        meetings can't be removed — cancel them instead.
+
+        (Used to hard-delete the meeting for both people, upcoming ones
+        included, and its reviews with it.)
+        """
+        meeting = self.get_object()
+        if not self._is_previous(meeting):
+            raise ValidationError(
+                {"detail": "Only previous meetings can be removed. Cancel an upcoming one instead."}
+            )
+        meeting.hidden_for.add(request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_create(self, serializer):
         sender = self.request.user

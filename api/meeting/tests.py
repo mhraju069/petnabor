@@ -225,3 +225,55 @@ class MeetingParticipantPrivacyTest(TestCase):
         self.assertEqual(sender_profile["city"], "Springfield")
         for private in ("address_street", "apartment", "zipcode", "location_point", "date_of_birth", "referral_code"):
             self.assertNotIn(private, sender_profile)
+
+
+class RemovePreviousMeetingTest(TestCase):
+    """Removing a previous meeting hides it for you only; upcoming can't be removed."""
+
+    # Same two friends and meeting factory as the timing tests.
+    setUp = MeetingTimingRulesTest.setUp
+    _meeting = MeetingTimingRulesTest._meeting
+
+    def _previous_ids(self, user):
+        self.client.force_authenticate(user=user)
+        response = self.client.get('/api/meetings/requests/previous/')
+        results = response.data.get('results', response.data)
+        return {str(m['id']) for m in results}
+
+    def test_remove_hides_it_for_me_only_and_keeps_reviews(self):
+        meeting = self._meeting(days_from_today=-3, status_value='COMPLETED')
+        MeetingFeedback.objects.create(
+            meeting=meeting, reviewer=self.bob, reviewee=self.alice, rating=5, feedback_text='Great!'
+        )
+
+        self.client.force_authenticate(user=self.alice)
+        response = self.client.delete(f'/api/meetings/requests/{meeting.id}/')
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertNotIn(str(meeting.id), self._previous_ids(self.alice))
+        self.assertIn(str(meeting.id), self._previous_ids(self.bob))  # Bob keeps it
+        self.assertTrue(Meeting.objects.filter(pk=meeting.pk).exists())
+        self.assertEqual(MeetingFeedback.objects.filter(meeting=meeting).count(), 1)  # review stays
+
+    def test_upcoming_meeting_cannot_be_removed(self):
+        meeting = self._meeting(days_from_today=2, status_value='ACCEPTED')
+        self.client.force_authenticate(user=self.alice)
+        response = self.client.delete(f'/api/meetings/requests/{meeting.id}/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(meeting.hidden_for.exists())
+
+    def test_cancelled_upcoming_meeting_can_be_removed(self):
+        meeting = self._meeting(days_from_today=2, status_value='CANCELLED')
+        self.client.force_authenticate(user=self.alice)
+        response = self.client.delete(f'/api/meetings/requests/{meeting.id}/')
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_meetings_cannot_be_edited_directly(self):
+        meeting = self._meeting(days_from_today=2, status_value='PENDING')
+        self.client.force_authenticate(user=self.bob)
+        response = self.client.patch(
+            f'/api/meetings/requests/{meeting.id}/', {'status': 'COMPLETED'}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.status, 'PENDING')

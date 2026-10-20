@@ -2,7 +2,7 @@
 {% load i18n unfold %}
 
 {% block title %}
-    PetNabor Social Command Center | {{ site_title|default:_('Django site admin') }}
+    Dashboard | {{ site_title|default:_('Django site admin') }}
 {% endblock %}
 
 {# Keep Unfold's default header: it holds the sidebar toggle. Overriding it
@@ -10,361 +10,205 @@
    to bring it back after collapsing it. #}
 
 {% block content %}
+{# Own small CSS (not Tailwind utilities): Unfold's stylesheet only ships the
+   classes it uses itself, so arbitrary sizes there may silently not apply. #}
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap');
-  
-  :root {
-    --primary: #6366f1;
-    --accent: #ec4899;
-    --glass: rgba(255, 255, 255, 0.7);
-    --border: rgba(255, 255, 255, 0.4);
-  }
-  .dark {
-    --glass: rgba(17, 24, 39, 0.8);
-    --border: rgba(55, 65, 81, 0.5);
-  }
-  
-  body, html { font-family: 'Outfit', sans-serif !important; }
-  
-  /* Full Width & Hide Default Header */
-  #main { background: #f8fafc !important; }
-  .dark #main { background: #0f172a !important; }
-  #content { max-width: 100% !important; padding: 0 !important; }
-  
-  .premium-header {
-    background: var(--glass);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-bottom: 1px solid var(--border);
-    padding: 2rem 3rem;
-  }
-  
-  .glass-card-v3 {
-    background: var(--glass);
-    backdrop-filter: blur(16px);
-    border: 1px solid var(--border);
-    border-radius: 2rem;
-    padding: 2rem;
-    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    box-shadow: 0 10px 30px -5px rgba(0,0,0,0.05);
-  }
-  .glass-card-v3:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 25px 50px -12px rgba(99, 102, 241, 0.2);
-    border-color: var(--primary);
-  }
+  .pn { --card: #fff; --line: #e5e7eb; --muted: #6b7280; --text: #111827; --soft: #f3f4f6;
+        --primary: #4f46e5; --danger: #e11d48; padding: 4px 0 24px; }
+  .dark .pn { --card: #111827; --line: #1f2937; --muted: #9ca3af; --text: #f3f4f6; --soft: #1f2937; }
 
-  .stat-val { font-size: 2.5rem; font-weight: 900; line-height: 1; margin-top: 0.5rem; }
-  .stat-label { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b; }
-  
-  .ping-dot {
-    width: 8px; height: 8px; background: #10b981; border-radius: 50%; position: relative;
-  }
-  .ping-dot::after {
-    content: ''; position: absolute; width: 100%; height: 100%; top: 0; left: 0; background: #10b981; border-radius: 50%; animation: pulse 2s infinite;
-  }
-  @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(3); opacity: 0; } }
+  .pn-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .pn-top h1 { font-size: 18px; font-weight: 600; color: var(--text); margin: 0; }
+  .pn-sub { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .pn-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; }
+
+  .pn-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  .pn-card-head { display: flex; align-items: center; justify-content: space-between;
+                  padding: 12px 14px 0; font-size: 13px; font-weight: 600; color: var(--text); }
+  .pn-tag { font-size: 11px; font-weight: 500; color: var(--muted); background: var(--soft);
+            padding: 2px 8px; border-radius: 999px; }
+
+  /* KPI tiles: as many per row as fit, never squeezed below 150px. */
+  .pn-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .pn-kpi { display: flex; align-items: center; gap: 10px; padding: 10px 12px; text-decoration: none;
+            transition: border-color .15s; }
+  a.pn-kpi:hover { border-color: var(--primary); }
+  .pn-ico { flex: none; width: 32px; height: 32px; border-radius: 8px; display: flex;
+            align-items: center; justify-content: center; font-size: 18px !important; }
+  .pn-kpi-label { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pn-kpi-val { font-size: 18px; font-weight: 700; color: var(--text); line-height: 1.2; }
+  .pn-kpi.alert { border-color: rgba(225, 29, 72, .45); }
+
+  .c-purple { color: #6366f1; background: rgba(99,102,241,.1); }
+  .c-green  { color: #10b981; background: rgba(16,185,129,.1); }
+  .c-blue   { color: #3b82f6; background: rgba(59,130,246,.1); }
+  .c-pink   { color: #ec4899; background: rgba(236,72,153,.1); }
+  .c-orange { color: #f59e0b; background: rgba(245,158,11,.12); }
+  .c-red    { color: #e11d48; background: rgba(225,29,72,.1); }
+  .c-teal   { color: #14b8a6; background: rgba(20,184,166,.1); }
+  .c-indigo { color: #4f46e5; background: rgba(79,70,229,.1); }
+
+  .pn-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  @media (min-width: 1200px) { .pn-main { grid-template-columns: minmax(0, 1fr) 320px; } }
+  .pn-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .pn-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .pn-chart { position: relative; height: 180px; padding: 8px 12px 12px; }
+  .pn-chart.tall { height: 220px; }
+
+  .pn-list { padding: 6px 6px 8px; max-height: 340px; overflow-y: auto; }
+  .pn-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; text-decoration: none; }
+  a.pn-row:hover { background: var(--soft); }
+  .pn-avatar { flex: none; width: 28px; height: 28px; border-radius: 8px; background: rgba(99,102,241,.1);
+               color: #6366f1; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+  .pn-row-main { min-width: 0; flex: 1; }
+  .pn-row-title { font-size: 12.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pn-row-meta { font-size: 11px; color: var(--muted); }
+  .pn-btn { flex: none; font-size: 11px; font-weight: 600; color: #fff; background: var(--danger);
+            padding: 4px 10px; border-radius: 999px; text-decoration: none; }
+  .pn-empty { font-size: 12px; color: var(--muted); text-align: center; padding: 18px 8px; }
+  .pn-card.danger { border-top: 3px solid var(--danger); }
 </style>
 
-<!-- Premium Custom Header (Injected into Content to be SURE it shows) -->
-<div class="premium-header mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6 overflow-hidden">
-  <div class="flex items-center gap-6">
-    <div class="w-16 h-16 rounded-3xl bg-gradient-to-br from-indigo-500 to-pink-500 flex items-center justify-center shadow-2xl shadow-indigo-500/40">
-      <span class="material-symbols-outlined text-white text-3xl">insights</span>
-    </div>
-    <div>
-      <h1 class="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight">Social <span class="text-indigo-600">Insights</span></h1>
-      <div class="flex items-center gap-3 mt-1">
-        <span class="ping-dot"></span>
-        <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">PetNabor Live Monitoring</span>
+<div class="pn">
+  <div class="pn-top">
+    <h1>Dashboard</h1>
+    <div class="pn-sub"><span class="pn-dot"></span> Live · {% now "M j, Y g:i a" %}</div>
+  </div>
+
+  {# KPI tiles — each opens its list in the admin #}
+  <div class="pn-kpis">
+    {% for card in kpi_cards %}
+      {% if card.url %}<a href="{{ card.url }}" {% else %}<div {% endif %}
+         class="pn-card pn-kpi{% if card.color == 'red' and card.metric != '0' %} alert{% endif %}">
+        <span class="material-symbols-outlined pn-ico c-{{ card.color }}">{{ card.icon }}</span>
+        <div style="min-width:0">
+          <div class="pn-kpi-label">{{ card.title }}</div>
+          <div class="pn-kpi-val">{{ card.metric }}</div>
+        </div>
+      {% if card.url %}</a>{% else %}</div>{% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="pn-main">
+    <div class="pn-col">
+      <div class="pn-card">
+        <div class="pn-card-head">New users <span class="pn-tag">Last 30 days</span></div>
+        <div class="pn-chart tall"><canvas id="registrationChart"></canvas></div>
+      </div>
+
+      <div class="pn-charts">
+        <div class="pn-card">
+          <div class="pn-card-head">Users by role</div>
+          <div class="pn-chart"><canvas id="userTypeChart"></canvas></div>
+        </div>
+        <div class="pn-card">
+          <div class="pn-card-head">Top pet types</div>
+          <div class="pn-chart"><canvas id="petTypeChart"></canvas></div>
+        </div>
+        <div class="pn-card">
+          <div class="pn-card-head">Vendor plans</div>
+          <div class="pn-chart"><canvas id="vendorPlanChart"></canvas></div>
+        </div>
+        <div class="pn-card">
+          <div class="pn-card-head">Product events <span class="pn-tag">30 days</span></div>
+          <div class="pn-chart"><canvas id="productEventChart"></canvas></div>
+        </div>
       </div>
     </div>
-  </div>
-  
-  <div class="flex items-center gap-8 bg-white/40 dark:bg-gray-800/40 px-6 py-4 rounded-3xl border border-white/40 shadow-sm">
-    <div class="text-right">
-      <p class="text-[10px] font-black text-gray-400 uppercase">Current Session</p>
-      <p class="text-sm font-bold text-gray-700 dark:text-gray-300">{{ user.email }}</p>
-    </div>
-    <div class="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 font-black">
-      {{ user.email|slice:":2"|upper }}
+
+    <div class="pn-col">
+      <div class="pn-card danger">
+        <div class="pn-card-head">Open reports <span class="pn-tag">{{ recent_reports|length }}{% if recent_reports|length == 10 %}+{% endif %}</span></div>
+        <div class="pn-list">
+          {% for report in recent_reports|slice:":5" %}
+            <div class="pn-row">
+              <div class="pn-row-main">
+                <div class="pn-row-title">{{ report.get_target_type_display|default:report.target_type }} · {{ report.reason|truncatechars:40 }}</div>
+                <div class="pn-row-meta">{{ report.created_at|timesince }} ago</div>
+              </div>
+              <a class="pn-btn" href="{% url 'admin:report_report_change' report.id %}">Review</a>
+            </div>
+          {% empty %}
+            <div class="pn-empty">No open reports. All clear 🐾</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="pn-card">
+        <div class="pn-card-head">Recently joined</div>
+        <div class="pn-list">
+          {% for u in recent_users %}
+            <a class="pn-row" href="{% url 'admin:users_user_change' u.pk %}">
+              <span class="pn-avatar">{{ u.email|default:u.username|slice:":1"|upper }}</span>
+              <div class="pn-row-main">
+                <div class="pn-row-title">{{ u.email|default:u.phone|default:u.username }}</div>
+                <div class="pn-row-meta">{{ u.get_user_type_display|default:u.user_type }} · {{ u.created_at|timesince }} ago</div>
+              </div>
+            </a>
+          {% empty %}
+            <div class="pn-empty">No users yet.</div>
+          {% endfor %}
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
-<div class="px-12 pb-12">
-    <!-- KPI Grid -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-8 mb-12">
-      {% for card in kpi_cards %}
-      <div class="glass-card-v3 relative overflow-hidden group">
-        <div class="absolute -right-4 -top-4 w-20 h-20 bg-indigo-500/5 group-hover:bg-indigo-500/10 rounded-full transition-all blur-xl"></div>
-        <div class="flex items-center justify-between mb-4">
-          <span class="material-symbols-outlined text-2xl
-            {% if card.color == 'purple' %}text-indigo-500
-            {% elif card.color == 'blue' %}text-blue-500
-            {% elif card.color == 'green' %}text-emerald-500
-            {% elif card.color == 'orange' %}text-orange-500
-            {% elif card.color == 'pink' %}text-pink-500
-            {% elif card.color == 'teal' %}text-teal-500
-            {% elif card.color == 'red' %}text-rose-500
-            {% endif %}
-          ">{{ card.icon }}</span>
-          {% if card.change %}
-            <span class="text-[10px] font-black {% if card.positive %}text-emerald-500{% else %}text-rose-500{% endif %}">{{ card.change }}</span>
-          {% endif %}
-        </div>
-        <p class="stat-label">{{ card.title }}</p>
-        <p class="stat-val text-gray-900 dark:text-white">{{ card.metric }}</p>
-      </div>
-      {% endfor %}
-    </div>
-
-    <!-- Analytics Section -->
-    <div class="grid grid-cols-1 xl:grid-cols-12 gap-10">
-      
-      <!-- Charts Side -->
-      <div class="xl:col-span-8 flex flex-col gap-10">
-        <div class="glass-card-v3">
-          <div class="flex items-center justify-between mb-8">
-            <h3 class="text-xl font-black text-gray-900 dark:text-white">Growth Velocity</h3>
-            <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-full">Last 30 Days</span>
-          </div>
-          <div class="h-[350px]">
-            <canvas id="registrationChart"></canvas>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
-          <div class="glass-card-v3">
-            <h3 class="text-lg font-black text-gray-900 dark:text-white mb-8">Persona Distribution</h3>
-            <div class="h-[280px]">
-              <canvas id="userTypeChart"></canvas>
-            </div>
-          </div>
-          <div class="glass-card-v3">
-            <h3 class="text-lg font-black text-gray-900 dark:text-white mb-8">Top Pet Trends</h3>
-            <div class="h-[280px]">
-              <canvas id="petTypeChart"></canvas>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-10 mt-10">
-          <div class="glass-card-v3">
-            <h3 class="text-lg font-black text-gray-900 dark:text-white mb-8">Vendor Plans</h3>
-            <div class="h-[280px]">
-              <canvas id="vendorPlanChart"></canvas>
-            </div>
-          </div>
-          <div class="glass-card-v3">
-            <h3 class="text-lg font-black text-gray-900 dark:text-white mb-8">Product Events</h3>
-            <div class="h-[280px]">
-              <canvas id="productEventChart"></canvas>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Feed Side -->
-      <div class="xl:col-span-4 flex flex-col gap-10">
-        <div class="glass-card-v3 flex flex-col min-h-[500px]">
-          <h3 class="text-xl font-black text-gray-900 dark:text-white mb-8 flex items-center gap-3">
-            <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-            Recently Joined
-          </h3>
-          <div class="flex-1 overflow-y-auto pr-2" style="scrollbar-width: thin; scrollbar-color: #6366f1 transparent;">
-            {% for user in recent_users %}
-            <div class="flex items-center gap-4 mb-6 hover:translate-x-2 transition-transform cursor-pointer group">
-              <div class="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-900/10 flex items-center justify-center text-indigo-500 font-black text-lg">
-                {{ user.email|slice:":1"|upper }}
-              </div>
-              <div>
-                <p class="text-sm font-black text-gray-900 dark:text-white group-hover:text-indigo-500 transition-colors">{{ user.email|default:user.phone }}</p>
-                <p class="text-[10px] font-bold text-gray-400 uppercase">{{ user.user_type }} • {{ user.created_at|date:"M d, g:i a" }}</p>
-              </div>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-
-        <!-- Safety Card -->
-        <div class="glass-card-v3 border-t-8 border-rose-500">
-          <h3 class="text-xl font-black text-gray-900 dark:text-white mb-6">Security Queue</h3>
-          <div class="flex flex-col gap-4">
-            {% for report in recent_reports|slice:":3" %}
-            <div class="p-5 rounded-3xl bg-rose-500/5 border border-rose-500/10 mb-4 last:mb-0">
-              <p class="text-[10px] font-black text-rose-500 uppercase mb-2">{{ report.reason|truncatechars:25 }}</p>
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-xs font-bold text-gray-800 dark:text-gray-200 truncate">Issue #{{ report.id|stringformat:"str"|slice:":8" }}</span>
-                <a href="{% url 'admin:report_report_change' report.id %}" class="shrink-0 text-[10px] font-black px-4 py-2 bg-rose-500 text-white rounded-full hover:scale-105 transition-transform">Review</a>
-              </div>
-            </div>
-            {% empty %}
-            <p class="text-xs text-gray-400 italic text-center py-10">No pending security issues.</p>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-    </div>
-</div>
-
+{{ dashboard_charts|json_script:"pn-chart-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function () {
-  const isDark = document.documentElement.classList.contains('dark');
-  const textColor = isDark ? '#64748b' : '#94a3b8';
+  const data = JSON.parse(document.getElementById('pn-chart-data').textContent);
+  const dark = document.documentElement.classList.contains('dark');
+  const grid = dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+  Chart.defaults.color = dark ? '#9ca3af' : '#6b7280';
+  Chart.defaults.font.size = 11;
 
-  Chart.defaults.font.family = "'Outfit', sans-serif";
-  Chart.defaults.color = textColor;
+  const axes = {
+    x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+    y: { grid: { color: grid }, border: { display: false }, beginAtZero: true, ticks: { precision: 0, maxTicksLimit: 5 } },
+  };
+  const noLegend = { legend: { display: false } };
 
-  function setGradient(ctx, color) {
-    const g = ctx.createLinearGradient(0, 0, 0, 400);
-    g.addColorStop(0, `${color}44`);
-    g.addColorStop(1, `${color}00`);
-    return g;
-  }
-
-  // Growth
-  const regCtx = document.getElementById('registrationChart')?.getContext('2d');
-  if (regCtx) {
-    new Chart(regCtx, {
+  function line(id, d, color) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const ctx = el.getContext('2d');
+    const fill = ctx.createLinearGradient(0, 0, 0, 220);
+    fill.addColorStop(0, color + '33');
+    fill.addColorStop(1, color + '00');
+    new Chart(ctx, {
       type: 'line',
-      data: {
-        labels: {{ registration_chart.labels|safe|default:"[]" }},
-        datasets: [{
-          data: {{ registration_chart.data|safe|default:"[]" }},
-          borderColor: '#6366f1',
-          borderWidth: 5,
-          backgroundColor: setGradient(regCtx, '#6366f1'),
-          fill: true,
-          tension: 0.4,
-          pointRadius: 0,
-          pointHoverRadius: 10,
-          pointHoverBackgroundColor: '#6366f1',
-          pointHoverBorderColor: '#fff',
-          pointHoverBorderWidth: 4
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false }, border: { display: false } },
-          y: { grid: { color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }, border: { display: false }, beginAtZero: true }
-        }
-      }
+      data: { labels: d.labels, datasets: [{ data: d.data, borderColor: color, borderWidth: 2,
+        backgroundColor: fill, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: noLegend, scales: axes,
+        interaction: { mode: 'index', intersect: false } },
     });
   }
 
-  // Persona
-  const utCtx = document.getElementById('userTypeChart')?.getContext('2d');
-  if (utCtx) {
-    new Chart(utCtx, {
+  function donut(id, d, colors) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    new Chart(el, {
       type: 'doughnut',
-      data: {
-        labels: {{ user_type_chart.labels|safe|default:"[]" }},
-        datasets: [{
-          data: {{ user_type_chart.data|safe|default:"[]" }},
-          backgroundColor: ['#6366f1', '#ec4899', '#f59e0b', '#10b981'],
-          borderWidth: 0,
-          borderRadius: 20,
-          spacing: 10
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '85%',
-        plugins: {
-          legend: { position: 'bottom', labels: { padding: 30, usePointStyle: true, boxWidth: 6, font: { weight: '800' } } }
-        }
-      }
+      data: { labels: d.labels, datasets: [{ data: d.data, backgroundColor: colors, borderWidth: 0, spacing: 2 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '68%',
+        plugins: { legend: { position: 'right', labels: { usePointStyle: true, boxWidth: 6, padding: 10 } } } },
     });
   }
 
-  // Pets
-  const ptCtx = document.getElementById('petTypeChart')?.getContext('2d');
-  if (ptCtx) {
-    new Chart(ptCtx, {
+  line('registrationChart', data.registrations, '#6366f1');
+  line('productEventChart', data.product_events, '#10b981');
+  donut('userTypeChart', data.user_types, ['#6366f1', '#ec4899', '#f59e0b', '#10b981']);
+  donut('vendorPlanChart', data.vendor_plans, ['#ec4899', '#6366f1', '#8b5cf6', '#10b981']);
+
+  const pets = document.getElementById('petTypeChart');
+  if (pets) {
+    new Chart(pets, {
       type: 'bar',
-      data: {
-        labels: {{ pet_type_chart.labels|safe|default:"[]" }},
-        datasets: [{
-          data: {{ pet_type_chart.data|safe|default:"[]" }},
-          backgroundColor: '#6366f1',
-          borderRadius: 15,
-          barThickness: 20
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false }, border: { display: false } },
-          y: { grid: { color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }, border: { display: false }, beginAtZero: true }
-        }
-      }
-    });
-  }
-
-  // Vendor Plans
-  const vpCtx = document.getElementById('vendorPlanChart')?.getContext('2d');
-  if (vpCtx) {
-    new Chart(vpCtx, {
-      type: 'doughnut',
-      data: {
-        labels: {{ vendor_plan_chart.labels|safe|default:"[]" }},
-        datasets: [{
-          data: {{ vendor_plan_chart.data|safe|default:"[]" }},
-          backgroundColor: ['#ec4899', '#6366f1', '#8b5cf6', '#10b981'],
-          borderWidth: 0,
-          borderRadius: 20,
-          spacing: 10
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '85%',
-        plugins: {
-          legend: { position: 'bottom', labels: { padding: 30, usePointStyle: true, boxWidth: 6, font: { weight: '800' } } }
-        }
-      }
-    });
-  }
-
-  // Product Events
-  const peCtx = document.getElementById('productEventChart')?.getContext('2d');
-  if (peCtx) {
-    new Chart(peCtx, {
-      type: 'line',
-      data: {
-        labels: {{ product_event_chart.labels|safe|default:"[]" }},
-        datasets: [{
-          data: {{ product_event_chart.data|safe|default:"[]" }},
-          borderColor: '#10b981',
-          borderWidth: 5,
-          backgroundColor: setGradient(peCtx, '#10b981'),
-          fill: true,
-          tension: 0.4,
-          pointRadius: 0,
-          pointHoverRadius: 10,
-          pointHoverBackgroundColor: '#10b981',
-          pointHoverBorderColor: '#fff',
-          pointHoverBorderWidth: 4
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false }, border: { display: false } },
-          y: { grid: { color: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }, border: { display: false }, beginAtZero: true }
-        }
-      }
+      data: { labels: data.pet_types.labels, datasets: [{ data: data.pet_types.data,
+        backgroundColor: '#6366f1', borderRadius: 4, maxBarThickness: 18 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: noLegend, scales: axes },
     });
   }
 })();

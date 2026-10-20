@@ -301,3 +301,29 @@ class RequestIdTests(TestCase):
         record = logging.LogRecord("t", logging.INFO, __file__, 1, "hi", None, None)
         RequestIdLogFilter().filter(record)
         self.assertEqual(record.request_id, "-")
+
+
+class AdminDashboardTests(TestCase):
+    """The admin home renders: KPI tiles (with links), charts data, lists."""
+
+    def test_dashboard_renders(self):
+        import json
+
+        from django.conf import settings
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        admin = User.objects.create_superuser(email="dash@test.com", username="dash", password="pw")
+        User.objects.create_user(email="o'neil@test.com", username="oneil", password="pw")
+        self.client.force_login(admin)
+
+        response = self.client.get("/" + settings.ADMIN_URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "pn-kpis")
+        self.assertContains(response, "Pending Reports")
+        self.assertContains(response, "?is_resolved__exact=0")  # tile links to open reports
+
+        charts = response.context["dashboard_charts"]
+        json.dumps(charts)  # chart data must be JSON-serialisable
+        # One point per day for the last 30 days, quiet days included.
+        self.assertEqual(len(charts["registrations"]["data"]), 30)

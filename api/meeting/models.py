@@ -29,6 +29,10 @@ class Meeting(models.Model):
     message = models.TextField(blank=True, null=True)
     
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+
+    # People who removed this meeting from their own history (Previous tab).
+    # Per person: the other participant keeps it, and reviews stay.
+    hidden_for = models.ManyToManyField(User, related_name='hidden_meetings', blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
