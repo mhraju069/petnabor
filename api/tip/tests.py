@@ -260,9 +260,12 @@ class ConnectStatusTests(TestCase):
         self.client.force_authenticate(user=self.user)
         self.url = reverse("tip:connect-status")
 
-    def test_no_account_returns_404(self):
+    def test_no_account_returns_not_connected(self):
+        # The endpoint answers "not connected" (200), not 404 — the app
+        # shows the set-up screen from it.
         response = self.client.get(self.url)
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data, {"is_connect": False})
 
     @patch("api.tip.services._stripe")
     def test_syncs_account_from_stripe(self, mock_stripe):
@@ -432,8 +435,9 @@ class SendTipTests(TestCase):
         call_kwargs = mock_s.PaymentIntent.create.call_args.kwargs
         self.assertNotIn("transfer_data", call_kwargs)
         self.assertNotIn("application_fee_amount", call_kwargs)
-        # Recipient notified
-        mock_notify.assert_called_once()
+        # Nobody is notified yet: that happens once the card payment is
+        # confirmed (payment_intent.succeeded), not for an unpaid tip.
+        mock_notify.assert_not_called()
         # Serializer flag
         self.assertTrue(response.data["tip"]["is_held"])
 
@@ -537,28 +541,28 @@ class TipHistoryTests(TestCase):
 
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data["results"]), 2)
 
     def test_filter_sent(self):
         make_tip(self.user1, self.user2)
         make_tip(self.user2, self.user1)
         response = self.client.get(self.url, {"direction": "sent"})
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(str(response.data[0]["tipper"]["id"]), str(self.user1.id))
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(str(response.data["results"][0]["tipper"]["id"]), str(self.user1.id))
 
     def test_filter_received(self):
         make_tip(self.user1, self.user2)
         make_tip(self.user2, self.user1)
         response = self.client.get(self.url, {"direction": "received"})
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(str(response.data[0]["recipient"]["id"]), str(self.user1.id))
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(str(response.data["results"][0]["recipient"]["id"]), str(self.user1.id))
 
     def test_filter_by_status(self):
         make_tip(self.user1, self.user2, status=TipStatus.SUCCEEDED)
         make_tip(self.user1, self.user2, status=TipStatus.FAILED)
         response = self.client.get(self.url, {"status": "succeeded"})
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["status"], "succeeded")
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["status"], "succeeded")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -873,7 +877,7 @@ class WithdrawalTests(TestCase):
         )
         response = self.client.get(self.history_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 2)
+        self.assertEqual(len(response.data["results"]), 2)
 
     def test_withdrawal_history_isolated_to_user(self):
         """Another user's withdrawals should not appear."""
@@ -888,7 +892,7 @@ class WithdrawalTests(TestCase):
         )
         response = self.client.get(self.history_url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(len(response.data["results"]), 0)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1010,8 +1014,8 @@ class HoldAndReleaseTests(TestCase):
         self.assertNotIn("application_fee_amount", call_kwargs)
         self.assertEqual(call_kwargs["metadata"]["flow"], "held")
 
-        # Recipient must be notified
-        mock_notify.assert_called_once()
+        # Not yet: the recipient is told once the payment is confirmed.
+        mock_notify.assert_not_called()
 
     @patch("api.tip.services._stripe")
     def test_direct_tip_created_when_account_verified(self, mock_stripe):
@@ -1070,7 +1074,11 @@ class HoldAndReleaseTests(TestCase):
         tip.refresh_from_db()
         self.assertEqual(tip.status, TipStatus.HELD)   # still HELD
         self.assertEqual(tip.stripe_charge_id, "ch_held_confirmed")  # charge stored
-        mock_notify.assert_called_once()  # re-notification sent
+        # Both told: the recipient to set up payouts, the tipper that it's held.
+        self.assertEqual(mock_notify.call_count, 2)
+        recipient_call = mock_notify.call_args_list[0].kwargs
+        self.assertEqual(recipient_call["user_id"], tip.recipient_id)
+        self.assertEqual(recipient_call["data"]["action"], "connect_stripe")
 
     @patch("api.tip.services.construct_stripe_event")
     def test_webhook_succeeded_on_pending_tip_marks_succeeded(self, mock_construct):
@@ -1356,14 +1364,14 @@ class HoldAndReleaseTests(TestCase):
         self.client.force_authenticate(user=self.tipper)
         response = self.client.get(reverse("tip:tip-history"), {"direction": "sent"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["status"], "held")
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["status"], "held")
 
         # Recipient view
         self.client.force_authenticate(user=self.recipient)
         response = self.client.get(reverse("tip:tip-history"), {"direction": "received"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data), 1)
+        self.assertEqual(len(response.data["results"]), 1)
 
     def test_filter_by_held_status(self):
         make_tip(self.tipper, self.recipient, status=TipStatus.SUCCEEDED)
@@ -1372,8 +1380,8 @@ class HoldAndReleaseTests(TestCase):
         response = self.client.get(
             reverse("tip:tip-history"), {"direction": "sent", "status": "held"}
         )
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["status"], "held")
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(response.data["results"][0]["status"], "held")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
