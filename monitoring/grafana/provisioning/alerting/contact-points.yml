@@ -1,0 +1,13 @@
+# Where alerts go: e-mail to ALERT_EMAILS (.env; several addresses: a;b).
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: PetNabor email
+    receivers:
+      - uid: petnabor-email
+        type: email
+        settings:
+          addresses: ${ALERT_EMAILS}
+          singleEmail: true
+        # Also e-mail when the problem is fixed.
+        disableResolveMessage: false

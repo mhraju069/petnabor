@@ -1,0 +1,11 @@
+# Every alert → the e-mail contact point. One e-mail per alert type, at
+# most every 5 min while things change; a reminder every 4 h if it's
+# still broken.
+apiVersion: 1
+policies:
+  - orgId: 1
+    receiver: PetNabor email
+    group_by: ["alertname"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

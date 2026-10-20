@@ -74,9 +74,36 @@ To have Grafana on its own HTTPS address instead, see `nginx-grafana.conf`.
   `monitoring/metrics_token` differ, or the web container wasn't restarted.
 - `celery` UP but no task numbers → the worker wasn't restarted with `-E`.
 
-## Later
+## Alerts (e-mail)
 
-Alerts (e-mail / Telegram / Slack when the app is down, errors spike, disk
-fills up): Grafana → Alerting. Suggested rules: web app down 2 min;
-5xx above 5% for 5 min; p95 above 2 s for 10 min; disk above 85 %;
-any Celery task failing repeatedly.
+Rules: `grafana/provisioning/alerting/rules.yml` — app / Postgres / Redis
+down (2 min), 5xx above 5 % (5 min, only with real traffic), p95 above 2 s
+(10 min), 5+ failed Celery tasks in 15 min, disk above 85 %, memory above
+90 % (10 min). One e-mail when it starts, one when it's fixed, a reminder
+every 4 h while it lasts.
+
+1. Who gets them (several: separate with `;`):
+
+   ```bash
+   echo "ALERT_EMAILS=you@example.com" >> .env
+   ```
+
+2. Sending: by default Grafana uses the app's Resend account
+   (`RESEND_API_KEY` in `.env`) from `DEFAULT_FROM_EMAIL`. If the app sends
+   e-mail another way, set Grafana's own SMTP instead:
+
+   ```bash
+   ALERT_SMTP_HOST=smtp.example.com:587
+   ALERT_SMTP_USER=...
+   ALERT_SMTP_PASSWORD=...
+   ALERT_FROM_EMAIL=alerts@petnabor.com
+   ```
+
+3. Restart Grafana:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d grafana
+   ```
+
+4. Test: Grafana → Alerting → Contact points → **PetNabor email** → Test.
+   The rules are under Alerting → Alert rules (folder PetNabor).

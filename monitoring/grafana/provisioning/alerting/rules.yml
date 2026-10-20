@@ -1,0 +1,334 @@
+# Alert rules (generated). E-mail goes to ALERT_EMAILS — see contact-points.yml.
+apiVersion: 1
+groups:
+- orgId: 1
+  name: PetNabor
+  folder: PetNabor
+  interval: 1m
+  rules:
+  - uid: app-down
+    title: App down
+    condition: C
+    for: 2m
+    noDataState: Alerting
+    execErrState: Error
+    labels:
+      severity: critical
+    annotations:
+      summary: The PetNabor app isn't responding
+      description: 'Prometheus can''t reach the web app (web:8000) for 2 minutes. Check: docker compose ps; docker compose
+        logs --tail=60 web'
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max(up{job="django"})
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: lt
+            params:
+            - 1
+  - uid: postgres-down
+    title: Postgres down
+    condition: C
+    for: 2m
+    noDataState: Alerting
+    execErrState: Error
+    labels:
+      severity: critical
+    annotations:
+      summary: The database is down
+      description: 'Postgres hasn''t answered for 2 minutes. Check: docker compose logs --tail=60 db'
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max(pg_up)
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: lt
+            params:
+            - 1
+  - uid: redis-down
+    title: Redis down
+    condition: C
+    for: 2m
+    noDataState: Alerting
+    execErrState: Error
+    labels:
+      severity: critical
+    annotations:
+      summary: Redis is down (cache, Celery queue, live events)
+      description: 'Redis hasn''t answered for 2 minutes. Check: docker compose logs --tail=60 redis'
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max(redis_up)
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: lt
+            params:
+            - 1
+  - uid: errors-spiking
+    title: Server errors spiking
+    condition: C
+    for: 5m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: critical
+    annotations:
+      summary: More than 5% of requests are failing (5xx)
+      description: See the 'Most server errors' table on the PetNabor overview dashboard for the endpoint, then docker compose
+        logs web.
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: (sum(rate(django_http_responses_total_by_status_view_method_total{status=~"5.."}[5m])) / sum(rate(django_http_responses_total_by_status_view_method_total[5m])))
+          and on() (sum(rate(django_http_responses_total_by_status_view_method_total[5m])) > 0.05)
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0.05
+  - uid: app-slow
+    title: App slow
+    condition: C
+    for: 10m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: warning
+    annotations:
+      summary: 'The app is slow: 95% of requests take over 2 s'
+      description: See 'Slowest endpoints' on the PetNabor overview dashboard; also check CPU and DB connections.
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: histogram_quantile(0.95, sum by (le) (rate(django_http_requests_latency_seconds_by_view_method_bucket[5m])))
+          and on() (sum(rate(django_http_responses_total_by_status_view_method_total[5m])) > 0.05)
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 2
+  - uid: celery-failing
+    title: Background jobs failing
+    condition: C
+    for: 0s
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: warning
+    annotations:
+      summary: Background jobs are failing (5+ in 15 min)
+      description: Image processing, pushes or e-mails may not be happening. See 'Failing tasks' on the overview dashboard,
+        then docker compose logs --tail=100 celery.
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: sum(increase(flower_events_total{type="task-failed"}[15m]))
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 4
+  - uid: disk-full
+    title: Disk almost full
+    condition: C
+    for: 5m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: critical
+    annotations:
+      summary: The server disk is over 85% full
+      description: 'When it fills up, uploads, the database and logs stop working. Free space: docker system prune (unused
+        images), old logs, or a bigger disk.'
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: 1 - max(node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"}) / max(node_filesystem_size_bytes{mountpoint="/",fstype!="rootfs"})
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0.85
+  - uid: memory-full
+    title: Memory almost full
+    condition: C
+    for: 10m
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: warning
+    annotations:
+      summary: The server is using over 90% of its memory
+      description: See 'Memory by container' on the overview dashboard for what's using it.
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: 1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0.9
