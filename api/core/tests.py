@@ -244,3 +244,21 @@ class SitterEventsTests(TestCase):
             user.user_type = "petsitter"
             user.save()
         bcast.assert_called_once_with("sitters.new")
+
+
+class MetricsEndpointTests(TestCase):
+    """/metrics/ is only for Prometheus (token), invisible to everyone else."""
+
+    @override_settings(METRICS_TOKEN="")
+    def test_off_without_a_token(self):
+        self.assertEqual(self.client.get("/metrics/").status_code, 404)
+
+    @override_settings(METRICS_TOKEN="s3cret")
+    def test_requires_the_token(self):
+        self.assertEqual(self.client.get("/metrics/").status_code, 404)
+        self.assertEqual(
+            self.client.get("/metrics/", HTTP_AUTHORIZATION="Bearer wrong").status_code, 404
+        )
+        response = self.client.get("/metrics/", HTTP_AUTHORIZATION="Bearer s3cret")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"django_http_requests", response.content)

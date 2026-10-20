@@ -1,0 +1,105 @@
+# Server monitoring: Prometheus collects, Grafana shows. See monitoring/README.md.
+#
+# Runs next to the app (same project, same network):
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+#
+# Every UI is bound to 127.0.0.1 only — reach them over an SSH tunnel or an
+# HTTPS nginx vhost (monitoring/nginx-grafana.conf), never directly.
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v2.53.2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=5GB
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/metrics_token:/etc/prometheus/metrics_token:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # The machine: CPU, memory, disk, network.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --path.rootfs=/host
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+
+  # Each container: CPU, memory, restarts.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=30s
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true
+    restart: unless-stopped
+
+  # Postgres: connections, query load, database size, locks.
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      - DATA_SOURCE_URI=db:5432/${POSTGRES_DB}?sslmode=disable
+      - DATA_SOURCE_USER=${POSTGRES_USER}
+      - DATA_SOURCE_PASS=${POSTGRES_PASSWORD}
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  # Redis (cache, Celery queue, live events): memory, clients, commands.
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Celery: task counts, failures, runtimes (needs `worker -E`, set in
+  # docker-compose.yml). Its UI is handy too: http://localhost:5555
+  flower:
+    image: mher/flower:2.0.1
+    command: celery --broker=redis://redis:6379/0 flower --port=5555
+    ports:
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:

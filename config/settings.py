@@ -32,6 +32,9 @@ ALLOWED_HOSTS = (
 
 # ALLOWED_HOSTS += [ "172.252.13.85", "localhost", "127.0.0.1"]
 
+# Prometheus scrapes http://web:8000/metrics/ inside the Docker network.
+ALLOWED_HOSTS += ["web"]
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 USE_X_FORWARDED_PORT = True
@@ -81,9 +84,17 @@ INSTALLED_APPS = [
     "api.wishlist",
     "api.tip",
     "axes",
+    "django_prometheus",
 ]
 
+# ── Monitoring (Prometheus → Grafana; see monitoring/README.md) ───────────
+# /metrics/ answers only with "Authorization: Bearer <METRICS_TOKEN>";
+# without the setting it's off (404).
+METRICS_TOKEN = os.getenv("METRICS_TOKEN", "")
+
 MIDDLEWARE = [
+    # Request count / latency / status metrics for Grafana (see /metrics/).
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -95,6 +106,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "api.users.middleware.UpdateLastActiveMiddleware",
     "api.users.middleware.VerificationEnforcementMiddleware",
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
     # Keep last: turns repeated failed admin logins into a lockout response.
     "axes.middleware.AxesMiddleware",
 ]
@@ -154,7 +166,8 @@ ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.contrib.gis.db.backends.postgis",
+        # PostGIS, plus query counts/latency for Grafana (django-prometheus).
+        "ENGINE": "django_prometheus.db.backends.postgis",
         "NAME": os.getenv("POSTGRES_DB"),
         "USER": os.getenv("POSTGRES_USER"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD"),

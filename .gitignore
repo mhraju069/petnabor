@@ -90,3 +90,5 @@ certbot/conf/
 petnabor-wildcard.csr
 petnabor-wildcard.key
 petnabor.pem
+# Monitoring secret (same value as METRICS_TOKEN in .env)
+monitoring/metrics_token

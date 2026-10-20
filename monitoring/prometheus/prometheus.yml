@@ -1,0 +1,44 @@
+# What Prometheus collects, every 30 s. Targets are Docker service names
+# (docker-compose.yml + docker-compose.monitoring.yml share one network).
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # The server: CPU, memory, disk, network.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # Each container.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  # Django: requests per endpoint, latency, status codes, DB queries.
+  # Token-protected (api/core/metrics.py): the same value as METRICS_TOKEN
+  # in .env, kept in monitoring/metrics_token.
+  - job_name: django
+    metrics_path: /metrics/
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/metrics_token
+    static_configs:
+      - targets: ["web:8000"]
+
+  # Celery tasks, via Flower.
+  - job_name: celery
+    static_configs:
+      - targets: ["flower:5555"]

@@ -17,10 +17,13 @@ services:
 
   web:
     build: .
-    command: gunicorn config.asgi:application -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 --workers 4
+    command: gunicorn config.asgi:application -c config/gunicorn.conf.py -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 --workers 4
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Combine the 4 workers' metrics for Grafana (api/core/metrics.py).
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-metrics
     depends_on:
       - db
       - redis
@@ -34,7 +37,8 @@ services:
 
   celery:
     build: .
-    command: celery -A config worker -B -l info
+    # -E: send task events (Flower turns them into Grafana metrics).
+    command: celery -A config worker -B -E -l info
     volumes:
       - .:/app
       - tmp_uploads_volume:/app/tmp_uploads
