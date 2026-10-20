@@ -536,7 +536,8 @@ class TipHistoryTests(TestCase):
 
     def test_history_returns_sent_and_received(self):
         make_tip(self.user1, self.user2)  # sent
-        make_tip(self.user2, self.user1)  # received
+        make_tip(self.user2, self.user1, status=TipStatus.SUCCEEDED)  # received
+        make_tip(self.user2, self.user1)  # received but unpaid: hidden from recipient
         make_tip(self.user2, make_user("other@test.com"))  # unrelated
 
         response = self.client.get(self.url)
@@ -552,7 +553,8 @@ class TipHistoryTests(TestCase):
 
     def test_filter_received(self):
         make_tip(self.user1, self.user2)
-        make_tip(self.user2, self.user1)
+        make_tip(self.user2, self.user1, status=TipStatus.SUCCEEDED)
+        make_tip(self.user2, self.user1)  # unpaid: hidden from recipient
         response = self.client.get(self.url, {"direction": "received"})
         self.assertEqual(len(response.data["results"]), 1)
         self.assertEqual(str(response.data["results"][0]["recipient"]["id"]), str(self.user1.id))
