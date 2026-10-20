@@ -58,6 +58,7 @@ class StripeConnectAccountAdmin(ModelAdmin):
         "is_charges_enabled",
         "is_payouts_enabled",
         "needs_reconnect",
+        "pending_stripe_account_id",
         "created_at",
     )
     list_select_related = ("user",)
@@ -68,6 +69,10 @@ class StripeConnectAccountAdmin(ModelAdmin):
         "is_onboarding_complete",
         "is_charges_enabled",
         "is_payouts_enabled",
+        "pending_stripe_account_id",
+        "switch_started_at",
+        "replaced_account_ids",
+        "last_available_balance",
         "created_at",
         "updated_at",
     )

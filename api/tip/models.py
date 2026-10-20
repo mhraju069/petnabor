@@ -113,6 +113,21 @@ class StripeConnectAccount(models.Model):
             "re-onboards to replace it."
         ),
     )
+    # Switching to a different Stripe account: the new one is onboarded here
+    # first; it replaces stripe_account_id once Stripe says it's ready.
+    pending_stripe_account_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="New Stripe account being set up to replace the current one.",
+    )
+    switch_started_at = models.DateTimeField(null=True, blank=True)
+    replaced_account_ids = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Stripe accounts this user used before (newest last), for support.",
+    )
     last_available_balance = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -136,6 +151,15 @@ class StripeConnectAccount(models.Model):
     @property
     def is_fully_verified(self):
         return self.is_onboarding_complete and self.is_charges_enabled and self.is_payouts_enabled
+
+    @property
+    def is_switching(self):
+        return bool(self.pending_stripe_account_id)
+
+    @property
+    def can_receive_tips(self):
+        """Tips may go straight to this account (not while switching away from it)."""
+        return self.is_fully_verified and not self.needs_reconnect and not self.is_switching
 
 
 # ──────────────────────────────────────────────

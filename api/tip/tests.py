@@ -1791,3 +1791,126 @@ class BalanceAvailableTests(TestCase):
         notify.assert_not_called()
         withdrawal.refresh_from_db()
         self.assertEqual(withdrawal.status, WithdrawalStatus.FAILED)
+
+
+class AccountSwitchTests(TestCase):
+    """Moving payouts to a different Stripe account without leaving money behind."""
+
+    EMPTY = {"available": [{"currency": "usd", "amount": 0}], "pending": [{"currency": "usd", "amount": 0}]}
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = make_user("sw_user@test.com")
+        self.tipper = make_user("sw_tipper@test.com")
+        self.connect = make_connect_account(self.user, account_id="acct_old")
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse("tip:connect-switch")
+
+    def _start(self, balance=None):
+        with patch("stripe.Balance.retrieve", return_value=balance or self.EMPTY), \
+                patch("stripe.Account.create", return_value=MagicMock(id="acct_new")), \
+                patch("stripe.AccountLink.create", return_value=MagicMock(url="https://connect.stripe.com/setup/x")):
+            return self.client.post(self.url)
+
+    def _held_paid_tip(self):
+        tip = make_tip(self.tipper, self.user, status=TipStatus.HELD)
+        tip.stripe_charge_id = "ch_sw"
+        tip.save()
+        return tip
+
+    def test_start_keeps_current_account_until_new_one_is_ready(self):
+        response = self._start()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["onboarding_url"], "https://connect.stripe.com/setup/x")
+        self.assertTrue(response.data["account"]["is_switching"])
+        self.connect.refresh_from_db()
+        self.assertEqual(self.connect.stripe_account_id, "acct_old")
+        self.assertEqual(self.connect.pending_stripe_account_id, "acct_new")
+
+    def test_blocked_while_money_is_on_current_account(self):
+        response = self._start({"available": [{"currency": "usd", "amount": 2500}], "pending": []})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("$25.00", response.data["detail"])
+        response = self._start({"available": [], "pending": [{"currency": "usd", "amount": 800}]})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("still clearing", response.data["detail"])
+        self.connect.refresh_from_db()
+        self.assertFalse(self.connect.is_switching)
+
+    def test_blocked_while_withdrawal_in_flight(self):
+        TipWithdrawal.objects.create(
+            user=self.user, connect_account=self.connect, amount=Decimal("20.00"),
+            currency="usd", stripe_payout_id="po_sw", status=WithdrawalStatus.PENDING,
+        )
+        response = self._start()
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("withdrawal", response.data["detail"])
+
+    @patch("stripe.PaymentIntent.create")
+    def test_tips_are_held_while_switching(self, pi_create):
+        self._start()
+        pi_create.return_value = MagicMock(id="pi_sw", client_secret="sec")
+        self.connect.refresh_from_db()
+        tip, _ = services.create_tip_payment_intent(self.tipper, self.user, Decimal("20.00"))
+        self.assertEqual(tip.status, TipStatus.HELD)
+        self.assertNotIn("transfer_data", pi_create.call_args.kwargs)
+
+    @patch("stripe.Transfer.create", return_value=MagicMock(id="tr_sw"))
+    def test_ready_new_account_replaces_old_and_gets_held_tips(self, transfer_create):
+        self._start()
+        tip = self._held_paid_tip()
+
+        services.handle_account_updated({
+            "id": "acct_new", "details_submitted": True, "charges_enabled": True, "payouts_enabled": True,
+        })
+
+        self.connect.refresh_from_db()
+        self.assertEqual(self.connect.stripe_account_id, "acct_new")
+        self.assertFalse(self.connect.is_switching)
+        self.assertEqual(self.connect.replaced_account_ids, ["acct_old"])
+        self.assertTrue(self.connect.is_fully_verified)
+        self.assertEqual(transfer_create.call_args.kwargs["destination"], "acct_new")
+        tip.refresh_from_db()
+        self.assertEqual(tip.status, TipStatus.SUCCEEDED)
+
+    def test_unfinished_new_account_changes_nothing(self):
+        self._start()
+        services.handle_account_updated({"id": "acct_new", "details_submitted": False, "charges_enabled": False})
+        self.connect.refresh_from_db()
+        self.assertEqual(self.connect.stripe_account_id, "acct_old")
+        self.assertTrue(self.connect.is_switching)
+        self.assertTrue(self.connect.is_fully_verified)  # old account untouched
+
+    @patch("stripe.Transfer.create", return_value=MagicMock(id="tr_back"))
+    def test_cancel_keeps_old_account_and_releases_held_tips_to_it(self, transfer_create):
+        self._start()
+        self._held_paid_tip()
+        response = self.client.delete(self.url)
+        self.assertEqual(response.data, {"cancelled": True})
+        self.connect.refresh_from_db()
+        self.assertFalse(self.connect.is_switching)
+        self.assertEqual(transfer_create.call_args.kwargs["destination"], "acct_old")
+
+    @patch("stripe.Transfer.create", return_value=MagicMock(id="tr_exp"))
+    def test_stale_switch_is_called_off(self, transfer_create):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        self._start()
+        StripeConnectAccount.objects.filter(pk=self.connect.pk).update(
+            switch_started_at=timezone.now() - timedelta(days=services.ACCOUNT_SWITCH_EXPIRY_DAYS + 1)
+        )
+        self.assertEqual(services.expire_stale_account_switches(), 1)
+        self.connect.refresh_from_db()
+        self.assertFalse(self.connect.is_switching)
+        self.assertEqual(self.connect.stripe_account_id, "acct_old")
+
+    def test_resume_reuses_the_pending_account(self):
+        self._start()
+        with patch("stripe.Account.create") as account_create, \
+                patch("stripe.AccountLink.create", return_value=MagicMock(url="https://connect.stripe.com/again")):
+            response = self.client.post(self.url)
+        self.assertEqual(response.status_code, 200)
+        account_create.assert_not_called()
+        self.assertEqual(response.data["onboarding_url"], "https://connect.stripe.com/again")

@@ -100,6 +100,30 @@ def create_connect_account(user):
     except StripeConnectAccount.DoesNotExist:
         pass
 
+    account = _create_express_account(user)
+
+    if existing is not None:
+        logger.warning(
+            "Replacing unusable Stripe account %s with %s for user %s",
+            existing.stripe_account_id, account.id, user.id,
+        )
+        existing.stripe_account_id = account.id
+        existing.needs_reconnect = False
+        existing.save(update_fields=["stripe_account_id", "needs_reconnect", "updated_at"])
+        connect = existing
+    else:
+        connect = StripeConnectAccount.objects.create(
+            user=user,
+            stripe_account_id=account.id,
+        )
+
+    onboarding_url = _get_account_link(account.id)
+    return connect, onboarding_url
+
+
+def _create_express_account(user):
+    """A new Stripe Express account for this user (manual payouts)."""
+    s = _stripe()
     email = (user.email or "").strip()
     business_url = getattr(settings, "BUSINESS_URL", "https://petnabor.com")
 
@@ -127,25 +151,7 @@ def create_connect_account(user):
     if email:
         account_params["email"] = email
 
-    account = s.Account.create(**account_params)
-
-    if existing is not None:
-        logger.warning(
-            "Replacing unusable Stripe account %s with %s for user %s",
-            existing.stripe_account_id, account.id, user.id,
-        )
-        existing.stripe_account_id = account.id
-        existing.needs_reconnect = False
-        existing.save(update_fields=["stripe_account_id", "needs_reconnect", "updated_at"])
-        connect = existing
-    else:
-        connect = StripeConnectAccount.objects.create(
-            user=user,
-            stripe_account_id=account.id,
-        )
-
-    onboarding_url = _get_account_link(account.id)
-    return connect, onboarding_url
+    return s.Account.create(**account_params)
 
 
 def _get_account_link(account_id, return_url=None, refresh_url=None):
@@ -203,7 +209,7 @@ def get_connect_account_status(user):
         if not _account_unusable(exc):
             raise
         _mark_needs_reconnect(connect, exc)
-        return connect
+        return _check_pending_switch(connect) if connect.is_switching else connect
 
     connect.needs_reconnect = False
     connect.is_charges_enabled = account.charges_enabled
@@ -234,6 +240,9 @@ def get_connect_account_status(user):
                 "Error auto-releasing held tips for user %s after status poll: %s", user.id, str(exc)
             )
 
+    # Last: a finished switch replaces the account synced above.
+    if connect.is_switching:
+        connect = _check_pending_switch(connect)
     return connect
 
 
@@ -273,6 +282,9 @@ def get_connect_account_details(user):
         "payout_schedule": "",
         "requirements_due": 0,
         "disabled_reason": "",
+        "is_switching": connect.is_switching,
+        "switch_started_at": connect.switch_started_at,
+        "switch_expires_days": ACCOUNT_SWITCH_EXPIRY_DAYS,
     }
     if connect.needs_reconnect:
         return details
@@ -327,6 +339,228 @@ def create_dashboard_link(user):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Switching to a different Stripe account
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# The current account keeps working until the new one finishes Stripe's
+# onboarding. Meanwhile new tips are HELD on the platform; when the new
+# account is ready it becomes the payout account and the held tips go there.
+# Money must never be left behind on the old account, so switching needs it
+# to be empty first.
+
+ACCOUNT_SWITCH_EXPIRY_DAYS = 7
+
+
+class SwitchAccountError(Exception):
+    """Why the user can't switch right now (the message is shown to them)."""
+
+
+def _switch_target_ready(account) -> bool:
+    return bool(account.get("details_submitted")) and bool(account.get("charges_enabled"))
+
+
+def _ensure_nothing_left_behind(user, connect):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    if TipWithdrawal.objects.filter(user=user, status=WithdrawalStatus.PENDING).exists():
+        raise SwitchAccountError(
+            "A withdrawal is still on its way to your bank. You can switch once it arrives."
+        )
+    if Tip.objects.filter(
+        recipient=user, status=TipStatus.PENDING,
+        created_at__gte=timezone.now() - timedelta(hours=1),
+    ).exists():
+        raise SwitchAccountError("Someone is paying you a tip right now. Try again in a few minutes.")
+
+    s = _stripe()
+    try:
+        balance = s.Balance.retrieve(stripe_account=connect.stripe_account_id)
+    except (stripe.error.InvalidRequestError, stripe.error.PermissionError) as exc:
+        if _account_unusable(exc):
+            return  # nothing reachable there to leave behind
+        raise
+    available, pending = _usd(balance.get("available")), _usd(balance.get("pending"))
+    if available <= 0 and pending <= 0:
+        return
+
+    minimum = TipSettings.get_instance().minimum_withdrawal_amount
+    if pending > 0:
+        raise SwitchAccountError(
+            f"${pending:.2f} is still clearing on your current account. Once it's "
+            "available (usually within a week), withdraw it, then switch."
+        )
+    if available < minimum:
+        raise SwitchAccountError(
+            f"Your current account still has ${available:.2f}, below the "
+            f"${minimum:.2f} minimum withdrawal. Contact support@petnabor.com and "
+            "we'll help you move it."
+        )
+    raise SwitchAccountError(
+        f"Your current account still has ${available:.2f}. Withdraw it first so "
+        "nothing is left behind, then switch."
+    )
+
+
+def start_account_switch(user):
+    """
+    Start moving payouts to a different, new Stripe account.
+    Returns (connect, onboarding_url) for the new account; starting again
+    while a switch is in progress resumes it.
+    Raises SwitchAccountError when money would be left on the current account.
+    """
+    from django.utils import timezone
+
+    try:
+        connect = user.stripe_connect_account
+    except StripeConnectAccount.DoesNotExist:
+        raise SwitchAccountError("You don't have a payout account yet. Set one up first.")
+    if connect.needs_reconnect:
+        raise SwitchAccountError("Your Stripe account is disconnected. Use Reconnect instead.")
+
+    with transaction.atomic():
+        connect = StripeConnectAccount.objects.select_for_update().get(pk=connect.pk)
+
+        if connect.is_switching:
+            try:
+                return connect, _get_account_link(connect.pending_stripe_account_id)
+            except (stripe.error.InvalidRequestError, stripe.error.PermissionError) as exc:
+                if not _account_unusable(exc):
+                    raise
+                logger.warning(
+                    "Pending switch account %s for user %s is gone; creating another",
+                    connect.pending_stripe_account_id, user.id,
+                )
+        else:
+            _ensure_nothing_left_behind(user, connect)
+
+        account = _create_express_account(user)
+        connect.pending_stripe_account_id = account.id
+        connect.switch_started_at = connect.switch_started_at or timezone.now()
+        connect.save(update_fields=["pending_stripe_account_id", "switch_started_at", "updated_at"])
+
+    logger.info(
+        "User %s started switching payouts %s -> %s",
+        user.id, connect.stripe_account_id, account.id,
+    )
+    return connect, _get_account_link(account.id)
+
+
+def complete_account_switch(connect, account):
+    """
+    The new account finished onboarding: it becomes the payout account and
+    held tips are released to it. Safe to call twice (webhook + status poll).
+    """
+    with transaction.atomic():
+        connect = StripeConnectAccount.objects.select_for_update().select_related("user").get(pk=connect.pk)
+        if connect.pending_stripe_account_id != account["id"]:
+            return connect  # already done, or cancelled
+
+        old_id = connect.stripe_account_id
+        connect.replaced_account_ids = [*(connect.replaced_account_ids or []), old_id]
+        connect.stripe_account_id = account["id"]
+        connect.pending_stripe_account_id = ""
+        connect.switch_started_at = None
+        connect.needs_reconnect = False
+        connect.is_charges_enabled = bool(account.get("charges_enabled"))
+        connect.is_payouts_enabled = bool(account.get("payouts_enabled"))
+        connect.is_onboarding_complete = _switch_target_ready(account)
+        connect.last_available_balance = Decimal("0.00")
+        connect.save()
+
+    logger.warning(
+        "User %s switched payout account %s -> %s", connect.user_id, old_id, connect.stripe_account_id
+    )
+    try:
+        send_notification(
+            title="Payout account switched",
+            body="Your new Stripe account is ready. Tips now go there.",
+            user_id=connect.user_id,
+            notification_type=NotificationTypes.TIP_ENABLE_REQUEST,
+            data={"action": "payout_account"},
+        )
+    except Exception as exc:
+        logger.warning("Notification failed after account switch for user %s: %s", connect.user_id, exc)
+
+    try:
+        release_held_tips(connect.user)
+    except Exception as exc:
+        logger.error("Error releasing held tips after switch for user %s: %s", connect.user_id, exc)
+    return connect
+
+
+def _check_pending_switch(connect):
+    """Status poll: finish the switch if the new account is ready."""
+    s = _stripe()
+    try:
+        pending = s.Account.retrieve(connect.pending_stripe_account_id)
+    except stripe.error.StripeError as exc:
+        logger.warning(
+            "Couldn't check pending switch account %s: %s", connect.pending_stripe_account_id, exc
+        )
+        return connect
+    if _switch_target_ready(pending):
+        connect = complete_account_switch(connect, pending)
+    return connect
+
+
+def cancel_account_switch(user):
+    """Keep the current account. Held tips go to it. Returns False if not switching."""
+    try:
+        connect = user.stripe_connect_account
+    except StripeConnectAccount.DoesNotExist:
+        return False
+
+    with transaction.atomic():
+        connect = StripeConnectAccount.objects.select_for_update().get(pk=connect.pk)
+        if not connect.is_switching:
+            return False
+        abandoned = connect.pending_stripe_account_id
+        connect.pending_stripe_account_id = ""
+        connect.switch_started_at = None
+        connect.save(update_fields=["pending_stripe_account_id", "switch_started_at", "updated_at"])
+
+    logger.info("User %s cancelled switching to %s", user.id, abandoned)
+    try:
+        release_held_tips(user)
+    except Exception as exc:
+        logger.error("Error releasing held tips after cancelled switch for user %s: %s", user.id, exc)
+    return True
+
+
+def expire_stale_account_switches(now=None):
+    """Switches not finished in ACCOUNT_SWITCH_EXPIRY_DAYS are called off so held tips don't wait."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    now = now or timezone.now()
+    stale = StripeConnectAccount.objects.exclude(pending_stripe_account_id="").filter(
+        switch_started_at__lt=now - timedelta(days=ACCOUNT_SWITCH_EXPIRY_DAYS)
+    ).select_related("user")
+    count = 0
+    for connect in stale:
+        if not cancel_account_switch(connect.user):
+            continue
+        count += 1
+        try:
+            send_notification(
+                title="Payout account switch cancelled",
+                body=(
+                    "You didn't finish setting up your new Stripe account, so tips keep "
+                    "going to your current one. You can switch again anytime in Settings."
+                ),
+                user_id=connect.user_id,
+                notification_type=NotificationTypes.TIP_ENABLE_REQUEST,
+                data={"action": "payout_account"},
+            )
+        except Exception as exc:
+            logger.warning("Notification failed for expired switch (user %s): %s", connect.user_id, exc)
+    return count
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Tip — Payment Intent
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -374,7 +608,8 @@ def create_tip_payment_intent(
     has_verified_account = False
     try:
         connect = recipient.stripe_connect_account
-        has_verified_account = connect.is_fully_verified
+        # Not while switching: those tips wait (HELD) for the new account.
+        has_verified_account = connect.can_receive_tips
     except StripeConnectAccount.DoesNotExist:
         pass
 
@@ -532,6 +767,9 @@ def release_held_tips(user):
             user.id, connect.is_charges_enabled, connect.is_onboarding_complete,
         )
         return
+    if connect.is_switching or connect.needs_reconnect:
+        logger.info("Skipping release for user %s — switching/reconnecting payout account", user.id)
+        return
 
     held_tips = Tip.objects.filter(
         recipient=user,
@@ -601,7 +839,13 @@ def handle_payment_intent_succeeded(payment_intent):
                     # every other recipient notification.
                     body=(
                         f"{tipper_name} sent you a ${tip.recipient_amount:.2f} tip. "
-                        "Connect your bank account to receive it."
+                        + (
+                            "It goes to your new Stripe account once you finish switching."
+                            if StripeConnectAccount.objects.filter(
+                                user_id=tip.recipient_id
+                            ).exclude(pending_stripe_account_id="").exists()
+                            else "Connect your bank account to receive it."
+                        )
                     ),
                     user_id=tip.recipient_id,
                     notification_type=NotificationTypes.TIP_ENABLE_REQUEST,
@@ -635,6 +879,8 @@ def handle_payment_intent_succeeded(payment_intent):
                     user_id=tip.recipient_id,
                     is_charges_enabled=True,
                     is_onboarding_complete=True,
+                    needs_reconnect=False,
+                    pending_stripe_account_id="",
                 ).first()
                 if connect_acct:
                     logger.info(
@@ -797,6 +1043,12 @@ def handle_account_updated(account):
     automatically release any HELD tips waiting for this user.
     """
     account_id = account["id"]
+
+    switching = StripeConnectAccount.objects.filter(pending_stripe_account_id=account_id).first()
+    if switching is not None:
+        if _switch_target_ready(account):
+            complete_account_switch(switching, account)
+        return
 
     try:
         connect = StripeConnectAccount.objects.get(stripe_account_id=account_id)
@@ -986,6 +1238,8 @@ def expire_held_tips(now=None):
     now = now or timezone.now()
     days = getattr(settings, "HELD_TIP_EXPIRY_DAYS", 30)
     refunded = cancelled = 0
+
+    expire_stale_account_switches(now)
 
     unpaid = Tip.objects.filter(
         status=TipStatus.HELD, stripe_charge_id__isnull=True,

@@ -33,6 +33,7 @@ class TipSettingsSerializer(serializers.ModelSerializer):
 
 class StripeConnectAccountSerializer(serializers.ModelSerializer):
     is_fully_verified = serializers.BooleanField(read_only=True)
+    is_switching = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = StripeConnectAccount
@@ -43,6 +44,8 @@ class StripeConnectAccountSerializer(serializers.ModelSerializer):
             "is_payouts_enabled",
             "is_fully_verified",
             "needs_reconnect",
+            "is_switching",
+            "switch_started_at",
             "created_at",
             "updated_at",
         ]

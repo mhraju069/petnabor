@@ -165,6 +165,51 @@ class ConnectDashboardLinkView(APIView):
         return Response({"url": url}, status=status.HTTP_200_OK)
 
 
+class ConnectSwitchView(APIView):
+    """
+    POST   /tip/connect/switch/  start (or resume) moving payouts to a new
+                                 Stripe account; returns its onboarding URL.
+    DELETE /tip/connect/switch/  keep the current account.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Switch to a different Stripe account",
+        responses={
+            200: OpenApiResponse(description="Onboarding URL for the new account."),
+            400: OpenApiResponse(description="Can't switch yet (e.g. money left on the current account)."),
+        },
+        tags=["Tip / Stripe Connect"],
+    )
+    def post(self, request):
+        try:
+            connect, onboarding_url = services.start_account_switch(request.user)
+        except services.SwitchAccountError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except stripe.error.StripeError as exc:
+            logger.error("Stripe error starting account switch: %s", str(exc))
+            return Response(
+                {"detail": "Stripe service unavailable. Please try again later."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(
+            {
+                "account": StripeConnectAccountSerializer(connect).data,
+                "onboarding_url": onboarding_url,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        summary="Cancel switching Stripe accounts",
+        responses={200: OpenApiResponse(description="{'cancelled': bool}")},
+        tags=["Tip / Stripe Connect"],
+    )
+    def delete(self, request):
+        cancelled = services.cancel_account_switch(request.user)
+        return Response({"cancelled": cancelled}, status=status.HTTP_200_OK)
+
+
 class OnboardBridgeView(APIView):
     """
     GET /tip/onboard/bridge/?status=return|refresh
