@@ -36,6 +36,7 @@ NOTIFICATION_SETTINGS_MAP = {
     NotificationTypes.MESSAGE: "message_notifications",
     NotificationTypes.TIP_RECEIVED: "system_notifications",
     NotificationTypes.TIP_SENT: "system_notifications",
+    NotificationTypes.TIP_AVAILABLE: "system_notifications",
     NotificationTypes.TIP_ENABLE_REQUEST: "system_notifications",
 }
 

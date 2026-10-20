@@ -113,6 +113,15 @@ class StripeConnectAccount(models.Model):
             "re-onboards to replace it."
         ),
     )
+    last_available_balance = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text=(
+            "USD available on Stripe as we last saw it. A balance.available "
+            "event above this means pending tips cleared: we notify the user."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

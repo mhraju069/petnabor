@@ -878,9 +878,15 @@ def handle_payout_failed(payout):
         failure_msg = payout.get("failure_message") or payout.get(
             "failure_code", "Unknown failure"
         )
+        already_failed = withdrawal.status == WithdrawalStatus.FAILED
         withdrawal.status = WithdrawalStatus.FAILED
         withdrawal.failure_message = failure_msg
         withdrawal.save(update_fields=["status", "failure_message", "updated_at"])
+        # The money returns to "available": not newly cleared tips, so don't
+        # announce it as such when the balance event arrives.
+        connect = withdrawal.connect_account
+        if connect is not None and not already_failed:
+            _set_last_available(connect, connect.last_available_balance + withdrawal.amount)
         logger.info(
             "Withdrawal %s failed (payout: %s): %s",
             withdrawal.id,
@@ -1219,6 +1225,9 @@ def get_full_balance_summary(user):
             if entry["currency"] == "usd":
                 result["available_balance"] = Decimal(str(entry["amount"])) / Decimal("100")
                 break
+        # Refunds/reversals lower the balance without an event: catch up.
+        if result["available_balance"] < connect.last_available_balance:
+            _set_last_available(connect, result["available_balance"])
         for entry in balance.get("pending", []):
             if entry["currency"] == "usd":
                 result["pending_balance"] = Decimal(str(entry["amount"])) / Decimal("100")
@@ -1277,8 +1286,83 @@ def create_withdrawal(user, amount: Decimal):
         stripe_payout_id=payout.id,
         status=WithdrawalStatus.PENDING,
     )
+    # Stripe sends no balance event when money leaves; keep our copy in step
+    # so the next tip that clears is seen as new money.
+    _set_last_available(connect, available - amount)
 
     return withdrawal
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pending → available ("your tips are ready to withdraw")
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def _set_last_available(connect, amount):
+    connect.last_available_balance = max(Decimal("0.00"), amount)
+    connect.save(update_fields=["last_available_balance", "updated_at"])
+
+
+def _usd(entries) -> Decimal:
+    for entry in entries or []:
+        if entry.get("currency") == "usd":
+            return Decimal(str(entry.get("amount", 0))) / Decimal("100")
+    return Decimal("0.00")
+
+
+def handle_balance_available(balance, account_id):
+    """
+    balance.available from a connected account: tips that were pending on
+    Stripe (2-7 days after payment) have cleared. Tell the user they can
+    withdraw. Only an increase over what we last saw counts, so retried or
+    duplicate events never notify twice.
+    """
+    if not account_id:
+        return  # the platform's own balance, not a user's
+
+    with transaction.atomic():
+        connect = (
+            StripeConnectAccount.objects.select_for_update()
+            .filter(stripe_account_id=account_id)
+            .first()
+        )
+        if connect is None:
+            logger.warning("balance.available for unknown account %s", account_id)
+            return
+
+        available = _usd(balance.get("available"))
+        added = available - connect.last_available_balance
+        _set_last_available(connect, available)
+        user_id = connect.user_id
+
+    if added <= 0:
+        return
+
+    minimum = TipSettings.get_instance().minimum_withdrawal_amount
+    if available >= minimum:
+        title = "Your tips are ready to withdraw"
+        body = f"${added:.2f} just cleared. You have ${available:.2f} available to withdraw."
+    else:
+        title = "Tip money cleared"
+        body = (
+            f"${added:.2f} just cleared. You have ${available:.2f}; "
+            f"you can withdraw once you reach ${minimum:.2f}."
+        )
+    logger.info("Account %s: $%s cleared ($%s available) -- notifying", account_id, added, available)
+    try:
+        send_notification(
+            title=title,
+            body=body,
+            user_id=user_id,
+            notification_type=NotificationTypes.TIP_AVAILABLE,
+            data={
+                "available": str(available),
+                "added": str(added),
+                "can_withdraw": "true" if available >= minimum else "false",
+            },
+        )
+    except Exception as exc:
+        logger.warning("Notification failed for cleared balance on %s: %s", account_id, exc)
 
 
 def construct_stripe_event(payload, sig_header):

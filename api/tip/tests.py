@@ -25,6 +25,7 @@ from rest_framework import status
 
 from api.users.models import User
 from api.meeting.models import Meeting
+from api.notifications.models import NotificationTypes
 from .models import (
     TipSettings,
     StripeConnectAccount,
@@ -1696,3 +1697,97 @@ class ConnectDetailsTests(TestCase):
         make_connect_account(self.user, verified=False)
         response = self.client.post(reverse("tip:connect-dashboard"))
         self.assertEqual(response.status_code, 400)
+
+
+class BalanceAvailableTests(TestCase):
+    """Pending tips clear on Stripe -> "ready to withdraw" push, exactly once."""
+
+    def setUp(self):
+        self.user = make_user("ba_user@test.com")
+        self.connect = make_connect_account(self.user)
+
+    def _event(self, cents, account=None):
+        return {
+            "id": f"evt_{uuid.uuid4().hex[:8]}",
+            "type": "balance.available",
+            "account": account or self.connect.stripe_account_id,
+            "data": {"object": {"object": "balance", "available": [{"currency": "usd", "amount": cents}]}},
+        }
+
+    def _post(self, event):
+        with patch("api.tip.services.construct_stripe_event", return_value=event):
+            return self.client.post(
+                reverse("tip:stripe-webhook"), data=b"{}", content_type="application/json",
+                HTTP_STRIPE_SIGNATURE="t=1,v1=sig",
+            )
+
+    @patch("api.tip.services.send_notification")
+    def test_cleared_money_notifies_once(self, notify):
+        self.assertEqual(self._post(self._event(1600)).status_code, 200)
+        self._post(self._event(1600))  # Stripe retry / duplicate
+
+        notify.assert_called_once()
+        kwargs = notify.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["notification_type"], NotificationTypes.TIP_AVAILABLE)
+        self.assertIn("$16.00", kwargs["body"])
+        self.connect.refresh_from_db()
+        self.assertEqual(self.connect.last_available_balance, Decimal("16.00"))
+
+    @patch("api.tip.services.send_notification")
+    def test_second_tip_reports_only_the_new_money(self, notify):
+        self._post(self._event(1600))
+        self._post(self._event(2500))
+        self.assertEqual(notify.call_count, 2)
+        self.assertIn("$9.00 just cleared", notify.call_args.kwargs["body"])
+        self.assertIn("$25.00 available", notify.call_args.kwargs["body"])
+
+    @patch("api.tip.services.send_notification")
+    def test_below_minimum_says_so(self, notify):
+        TipSettings.objects.all().delete()
+        settings_obj = TipSettings.get_instance()
+        settings_obj.minimum_withdrawal_amount = Decimal("10.00")
+        settings_obj.save()
+        self._post(self._event(500))
+        self.assertIn("once you reach $10.00", notify.call_args.kwargs["body"])
+        self.assertEqual(notify.call_args.kwargs["data"]["can_withdraw"], "false")
+
+    @patch("api.tip.services.send_notification")
+    def test_platform_and_unknown_accounts_ignored(self, notify):
+        event = self._event(5000)
+        event.pop("account")
+        self.assertEqual(self._post(event).status_code, 200)
+        self.assertEqual(self._post(self._event(5000, account="acct_unknown")).status_code, 200)
+        notify.assert_not_called()
+
+    @patch("api.tip.services.send_notification")
+    @patch("api.tip.services._stripe")
+    def test_after_withdrawal_next_tip_still_notifies(self, mock_stripe, notify):
+        self._post(self._event(5000))  # $50 cleared
+        mock_s = MagicMock()
+        mock_stripe.return_value = mock_s
+        mock_s.Balance.retrieve.return_value = {"available": [{"currency": "usd", "amount": 5000}]}
+        mock_s.Payout.create.return_value = MagicMock(id="po_ba")
+        services.create_withdrawal(self.user, Decimal("50.00"))
+        self.connect.refresh_from_db()
+        self.assertEqual(self.connect.last_available_balance, Decimal("0.00"))
+
+        self._post(self._event(1000))  # a new $10 tip clears
+        self.assertEqual(notify.call_count, 2)
+        self.assertIn("$10.00 just cleared", notify.call_args.kwargs["body"])
+
+    @patch("api.tip.services.send_notification")
+    def test_failed_payout_money_back_is_not_a_new_tip(self, notify):
+        withdrawal = TipWithdrawal.objects.create(
+            user=self.user, connect_account=self.connect, amount=Decimal("20.00"),
+            currency="usd", stripe_payout_id="po_fail", status=WithdrawalStatus.PENDING,
+        )
+        services.handle_payout_failed({"id": "po_fail", "failure_message": "Bank closed"})
+        services.handle_payout_failed({"id": "po_fail", "failure_message": "Bank closed"})  # retry
+        self.connect.refresh_from_db()
+        self.assertEqual(self.connect.last_available_balance, Decimal("20.00"))
+
+        self._post(self._event(2000))  # the $20 returns
+        notify.assert_not_called()
+        withdrawal.refresh_from_db()
+        self.assertEqual(withdrawal.status, WithdrawalStatus.FAILED)

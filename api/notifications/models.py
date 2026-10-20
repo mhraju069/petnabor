@@ -99,6 +99,7 @@ class NotificationTypes(models.TextChoices):
 
     TIP_RECEIVED = "tip_received", _("Tip Received")
     TIP_SENT = "tip_sent", _("Tip Sent")
+    TIP_AVAILABLE = "tip_available", _("Tips Ready to Withdraw")
     TIP_ENABLE_REQUEST = "tip_enable_request", _("Enable Tip Service")
 
 

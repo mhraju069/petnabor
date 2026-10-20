@@ -595,6 +595,10 @@ class StripeWebhookView(APIView):
             "payout.failed": services.handle_payout_failed,
             "charge.dispute.created": services.handle_dispute_created,
             "charge.dispute.closed": services.handle_dispute_closed,
+            # Connect event: event["account"] says whose balance it is.
+            "balance.available": lambda obj: services.handle_balance_available(
+                obj, event.get("account")
+            ),
         }
 
         handler = HANDLERS.get(event_type)
