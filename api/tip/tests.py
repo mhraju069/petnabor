@@ -1914,3 +1914,39 @@ class AccountSwitchTests(TestCase):
         self.assertEqual(response.status_code, 200)
         account_create.assert_not_called()
         self.assertEqual(response.data["onboarding_url"], "https://connect.stripe.com/again")
+
+
+class WithdrawalRecordsKeptTests(TestCase):
+    """Payout records survive account deletion (tax / Stripe reconciliation)."""
+
+    def setUp(self):
+        self.user = make_user("wk_user@test.com")
+        self.connect = make_connect_account(self.user, account_id="acct_keepme")
+
+    def test_deleting_the_user_keeps_the_withdrawal(self):
+        withdrawal = TipWithdrawal.objects.create(
+            user=self.user, connect_account=self.connect, stripe_account_id="acct_keepme",
+            amount=Decimal("25.00"), currency="usd", stripe_payout_id="po_kept",
+            status=WithdrawalStatus.PAID,
+        )
+
+        self.user.delete()  # also removes the Connect account row
+
+        withdrawal.refresh_from_db()
+        self.assertIsNone(withdrawal.user_id)
+        self.assertIsNone(withdrawal.connect_account_id)
+        self.assertEqual(withdrawal.stripe_account_id, "acct_keepme")
+        self.assertEqual(withdrawal.stripe_payout_id, "po_kept")
+        self.assertEqual(withdrawal.amount, Decimal("25.00"))
+        self.assertIn("deleted user", str(withdrawal))
+
+    @patch("api.tip.services._stripe")
+    def test_new_withdrawal_records_the_paying_account(self, mock_stripe):
+        mock_s = MagicMock()
+        mock_stripe.return_value = mock_s
+        mock_s.Balance.retrieve.return_value = {"available": [{"currency": "usd", "amount": 5000}]}
+        mock_s.Payout.create.return_value = MagicMock(id="po_rec")
+
+        withdrawal = services.create_withdrawal(self.user, Decimal("20.00"))
+
+        self.assertEqual(withdrawal.stripe_account_id, "acct_keepme")

@@ -64,8 +64,27 @@ services:
     restart: always
 
 
+  # Nightly database + media backup to off-site storage (Backblaze B2 / any
+  # S3-compatible bucket), weekly retention + check, monthly restore test.
+  # Setup and restore steps: docs/backups.md.
+  backup:
+    logging: *default-logging
+    build: ./backup
+    env_file:
+      - .env
+    volumes:
+      - media_volume:/media:ro
+      - backup_metrics:/metrics          # read by node-exporter (Grafana alerts)
+      - backup_cache:/root/.cache/restic # restic cache: faster backups
+    depends_on:
+      - db
+    restart: unless-stopped
+
+
 volumes:
   postgres_data:
   static_volume:
   media_volume:
   tmp_uploads_volume:
+  backup_metrics:
+  backup_cache:

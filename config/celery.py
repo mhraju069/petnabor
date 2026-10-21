@@ -20,4 +20,9 @@ app.conf.beat_schedule = {
         "task": "api.tip.tasks.expire_held_tips",
         "schedule": 6 * 60 * 60,  # every 6 hours
     },
+    # Data retention: old in-app notifications (docs/backups.md).
+    "purge-old-notifications": {
+        "task": "api.notifications.tasks.purge_old_notifications",
+        "schedule": 24 * 60 * 60,  # daily
+    },
 }

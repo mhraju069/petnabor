@@ -57,9 +57,12 @@ services:
     image: prom/node-exporter:v1.8.2
     command:
       - --path.rootfs=/host
+      # Backup results written by the `backup` service (docs/backups.md).
+      - --collector.textfile.directory=/backup-metrics
     pid: host
     volumes:
       - /:/host:ro,rslave
+      - backup_metrics:/backup-metrics:ro
     restart: unless-stopped
 
   # Each container: CPU, memory, restarts.
@@ -136,6 +139,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  backup_metrics: # shared with the backup service (docker-compose.yml)
   prometheus_data:
   grafana_data:
   loki_data:

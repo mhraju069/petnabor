@@ -334,3 +334,37 @@ class ChatPushStyleTests(TestCase):
         self.assertEqual(data["actor_id"], str(actor.id))
         self.assertEqual(data["actor_name"], "Lily Paws")
         self.assertEqual(data["actor_avatar"], "https://cdn/x.jpg")
+
+
+class PurgeOldNotificationsTests(TestCase):
+    """Data retention: read after 90 days, unread after 180 (defaults)."""
+
+    def test_deletes_only_expired(self):
+        from datetime import timedelta
+
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+
+        from api.notifications.models import Notifications
+        from api.notifications.tasks import purge_old_notifications
+
+        user = get_user_model().objects.create_user(
+            email="retention@test.com", username="retention", phone="19990001", password="x"
+        )
+        now = timezone.now()
+
+        def make(days_old, is_read):
+            n = Notifications.objects.create(user=user, title=f"{days_old}-{is_read}", is_read=is_read)
+            Notifications.objects.filter(pk=n.pk).update(created_at=now - timedelta(days=days_old))
+            return n
+
+        old_read = make(91, True)
+        recent_read = make(30, True)
+        old_unread_kept = make(120, False)
+        very_old_unread = make(181, False)
+
+        self.assertEqual(purge_old_notifications(), 2)
+        remaining = set(Notifications.objects.values_list("pk", flat=True))
+        self.assertEqual(remaining, {recent_read.pk, old_unread_kept.pk})
+        self.assertNotIn(old_read.pk, remaining)
+        self.assertNotIn(very_old_unread.pk, remaining)

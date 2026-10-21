@@ -1534,6 +1534,7 @@ def create_withdrawal(user, amount: Decimal):
     withdrawal = TipWithdrawal.objects.create(
         user=user,
         connect_account=connect,
+        stripe_account_id=connect.stripe_account_id,
         amount=amount,
         currency="usd",
         stripe_payout_id=payout.id,

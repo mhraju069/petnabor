@@ -235,10 +235,11 @@ class TipWithdrawalAdmin(ModelAdmin):
     )
     list_select_related = ("user",)
     list_filter = ("status", "currency", "created_at")
-    search_fields = ("user__email", "user__phone", "stripe_payout_id")
+    search_fields = ("user__email", "user__phone", "stripe_payout_id", "stripe_account_id")
     readonly_fields = (
         "user",
         "connect_account",
+        "stripe_account_id",
         "amount",
         "currency",
         "stripe_payout_id",
@@ -249,8 +250,9 @@ class TipWithdrawalAdmin(ModelAdmin):
     date_hierarchy = "created_at"
 
     fieldsets = (
+        # Empty user/account: the account was deleted; the payout record stays.
         ("User", {
-            "fields": ("user", "connect_account"),
+            "fields": ("user", "connect_account", "stripe_account_id"),
         }),
         ("Payout", {
             "fields": ("amount", "currency", "status", "stripe_payout_id"),

@@ -842,6 +842,11 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 # tipper after this many days (api.tip.services.expire_held_tips).
 HELD_TIP_EXPIRY_DAYS = int(os.getenv("HELD_TIP_EXPIRY_DAYS", "30"))
 
+# Data retention (docs/backups.md): in-app notifications are deleted after
+# this many days (read / still unread). Nightly Celery task.
+NOTIFICATION_RETENTION_READ_DAYS = int(os.getenv("NOTIFICATION_RETENTION_READ_DAYS", "90"))
+NOTIFICATION_RETENTION_UNREAD_DAYS = int(os.getenv("NOTIFICATION_RETENTION_UNREAD_DAYS", "180"))
+
 # Base URL for Stripe Connect redirect URLs
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://petnabor.com")
 

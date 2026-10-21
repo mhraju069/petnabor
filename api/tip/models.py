@@ -307,18 +307,34 @@ class TipWithdrawal(models.Model):
     """
     Tracks a recipient's withdrawal request.
     Funds are paid out via Stripe Payout to their Connected Account.
+
+    A payout record: kept when the account is deleted (user and Connect
+    account links are cleared, not the row) for tax and Stripe
+    reconciliation. `stripe_account_id` records which Stripe account paid
+    out, even after the user switches accounts or is deleted.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="tip_withdrawals",
     )
     connect_account = models.ForeignKey(
         StripeConnectAccount,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="withdrawals",
+    )
+    stripe_account_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Stripe Connect account the payout was made from (acct_xxx), as it was at the time.",
     )
 
     amount = models.DecimalField(
@@ -357,4 +373,5 @@ class TipWithdrawal(models.Model):
         ]
 
     def __str__(self):
-        return f"Withdrawal ${self.amount} by {self.user} [{self.status}]"
+        who = self.user or "deleted user"
+        return f"Withdrawal ${self.amount} by {who} [{self.status}]"

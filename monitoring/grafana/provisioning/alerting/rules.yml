@@ -332,3 +332,83 @@ groups:
             type: gt
             params:
             - 0.9
+  - uid: backup-missing
+    title: Backups missing
+    condition: C
+    for: 30m
+    noDataState: Alerting
+    execErrState: Error
+    labels:
+      severity: critical
+    annotations:
+      summary: No successful backup in over 26 hours
+      description: 'The nightly database + media backup hasn''t succeeded. Without it, a disk failure loses data. Check: docker compose logs --tail=80 backup ; run one now: docker compose exec backup backup.sh (docs/backups.md)'
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: time() - max(petnabor_backup_last_success_timestamp_seconds)
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 93600
+  - uid: backup-restore-test
+    title: Backup restore test failing
+    condition: C
+    for: 1h
+    noDataState: OK
+    execErrState: Error
+    labels:
+      severity: critical
+    annotations:
+      summary: The monthly restore test hasn''t passed in 35 days
+      description: 'Backups are taken but haven''t been proven to restore. Run it now: docker compose exec backup restore-test.sh and check its output (docs/backups.md)'
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: time() - max(petnabor_backup_restore_test_last_success_timestamp_seconds)
+        instant: true
+        range: false
+    - refId: B
+      datasourceUid: __expr__
+      model:
+        refId: B
+        type: reduce
+        expression: A
+        reducer: last
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: B
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 3024000
