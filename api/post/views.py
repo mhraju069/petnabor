@@ -142,6 +142,9 @@ class PostViewSet(viewsets.ModelViewSet):
             recent_comments = (
                 PostComment.objects.filter(parent_comment__isnull=True)
                 .select_related("user", "user__profile")
+                .prefetch_related(
+                    Prefetch("mentions", queryset=User.objects.select_related("profile"))
+                )
                 .order_by("created_at")
             )
 
@@ -417,8 +420,10 @@ class PostCommentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         post_id = self.request.query_params.get("post_id")
-        qs = PostComment.objects.select_related("user", "user__profile").filter(
-            parent_comment__isnull=True
+        qs = (
+            PostComment.objects.select_related("user", "user__profile")
+            .prefetch_related(Prefetch("mentions", queryset=User.objects.select_related("profile")))
+            .filter(parent_comment__isnull=True)
         )
         if post_id:
             qs = qs.filter(post_id=post_id)

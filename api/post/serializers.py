@@ -60,6 +60,12 @@ class PostCommentSerializer(serializers.ModelSerializer):
     user = AuthorBasicSerializer(read_only=True)
     # Read directly from the denormalized model field — no extra DB hit
     reply_count = serializers.IntegerField(source='replies_count', read_only=True)
+    # Friends tagged in the text as "@First Last" (the app highlights them).
+    mentions = AuthorBasicSerializer(many=True, read_only=True)
+    # Who to tag: friend ids. Only friends who can see the post are kept.
+    mention_ids = serializers.ListField(
+        child=serializers.UUIDField(), write_only=True, required=False, max_length=20
+    )
 
     class Meta:
         model = PostComment
@@ -67,6 +73,7 @@ class PostCommentSerializer(serializers.ModelSerializer):
             'id', 'post', 'user', 'parent_comment',
             'comment_text', 'media_file', 'is_edited',
             'created_at', 'updated_at', 'reply_count',
+            'mentions', 'mention_ids',
         ]
         read_only_fields = ['id', 'user', 'is_edited', 'created_at', 'updated_at']
 

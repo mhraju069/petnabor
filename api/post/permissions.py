@@ -59,7 +59,7 @@ class IsReporterOrAdmin(permissions.BasePermission):
         if request.user.is_staff:
             return True
         return obj.reporter == request.user
-class CanViewPost(permissions.BasePermission):
+def user_can_view_post(user, post):
     """
     Respects Post.privacy levels AND bidirectional block:
     - If either user has blocked the other → deny.
@@ -67,24 +67,28 @@ class CanViewPost(permissions.BasePermission):
     - FRIENDS_ONLY: Author and their friends can see.
     - PRIVATE: Only author can see.
     """
+    if post.author_id == user.id:
+        return True  # Owner always sees their own post
+
+    # Block check: deny access if blocked in either direction
+    if is_blocked(user, post.author):
+        return False
+
+    if post.privacy == PrivacyChoices.PUBLIC:
+        return True
+
+    if post.privacy == PrivacyChoices.FRIENDS_ONLY:
+        return Friendship.objects.filter(
+            Q(sender_id=post.author_id, receiver=user) |
+            Q(sender=user, receiver_id=post.author_id)
+        ).exists()
+
+    return False
+
+
+class CanViewPost(permissions.BasePermission):
+    """Who may see a post: see user_can_view_post."""
     def has_object_permission(self, request, view, obj):
         if not hasattr(obj, 'author'):
             return True  # Not a post or has no author
-
-        if obj.author == request.user:
-            return True  # Owner always sees their own post
-
-        # Block check: deny access if blocked in either direction
-        if is_blocked(request.user, obj.author):
-            return False
-
-        if obj.privacy == PrivacyChoices.PUBLIC:
-            return True
-
-        if obj.privacy == PrivacyChoices.FRIENDS_ONLY:
-            return Friendship.objects.filter(
-                Q(sender=obj.author, receiver=request.user) |
-                Q(sender=request.user, receiver=obj.author)
-            ).exists()
-
-        return False
+        return user_can_view_post(request.user, obj)

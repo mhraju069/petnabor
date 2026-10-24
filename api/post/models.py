@@ -170,6 +170,11 @@ class PostComment(models.Model):
     comment_text = models.TextField(null=True, blank=True)
     media_file = models.FileField(upload_to=comment_media_path, max_length=500, null=True, blank=True)
 
+    # Friends tagged with @Name in the comment (notified once).
+    mentions = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, related_name='comment_mentions', blank=True
+    )
+
     # Denormalized counter for nested replies
     replies_count = models.PositiveIntegerField(default=0)
 

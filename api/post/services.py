@@ -385,7 +385,9 @@ class CommentService:
     @transaction.atomic
     def create_comment(user: User, validated_data: dict) -> PostComment:
         """Creates a comment and increments the correct counters atomically."""
+        mention_ids = validated_data.pop("mention_ids", None) or []
         comment = PostComment.objects.create(user=user, **validated_data)
+        mentioned = CommentService._set_mentions(comment, user, mention_ids)
 
         if comment.media_file:
             from .tasks import process_post_comment_media_task
@@ -423,7 +425,72 @@ class CommentService:
         except Exception:
             logger.exception("Failed to send comment notification for post %s", comment.post_id)
 
+        CommentService._notify_mentioned(comment, user, mentioned)
         return comment
+
+    @staticmethod
+    def _set_mentions(comment: PostComment, user: User, mention_ids) -> list:
+        """
+        Tag friends in a comment. Kept only if they're the commenter's
+        friends, can see the post, and aren't blocked either way.
+        """
+        from api.friends.models import Friendship
+        from api.friends.services import is_blocked
+
+        from .permissions import user_can_view_post
+
+        ids = {str(i) for i in mention_ids} - {str(user.id)}
+        if not ids:
+            return []
+        friend_ids = set()
+        for sender_id, receiver_id in Friendship.objects.filter(
+            Q(sender=user, receiver_id__in=ids) | Q(receiver=user, sender_id__in=ids)
+        ).values_list("sender_id", "receiver_id"):
+            friend_ids.add(str(receiver_id if str(sender_id) == str(user.id) else sender_id))
+
+        post = comment.post
+        mentioned = [
+            friend
+            for friend in User.objects.filter(id__in=friend_ids, is_active=True)
+            if not is_blocked(user, friend) and user_can_view_post(friend, post)
+        ]
+        if mentioned:
+            comment.mentions.set(mentioned)
+        return mentioned
+
+    @staticmethod
+    def _notify_mentioned(comment: PostComment, user: User, mentioned: list) -> None:
+        if not mentioned:
+            return
+        try:
+            from api.notifications.models import NotificationTypes
+            from api.notifications.services import send_notification
+
+            # Whoever already gets "commented on your post" / "replied to your
+            # comment" isn't notified twice.
+            already = (
+                comment.parent_comment.user_id if comment.parent_comment_id else comment.post.author_id
+            )
+            recipients = [str(u.id) for u in mentioned if u.id != already]
+            if not recipients:
+                return
+            sender_display = f"{user.first_name} {user.last_name}".strip() or user.username or "Someone"
+            text = (comment.comment_text or "").strip()
+            if text:
+                short = text[:80] + ("\u2026" if len(text) > 80 else "")
+                body = f"mentioned you in a comment: \u201c{short}\u201d"
+            else:
+                body = "mentioned you in a comment."
+            send_notification(
+                title=sender_display,
+                body=body,
+                user_ids=recipients,
+                notification_type=NotificationTypes.POST_MENTION,
+                actor=user,
+                data={"post_id": str(comment.post_id), "comment_id": str(comment.id)},
+            )
+        except Exception:
+            logger.exception("Failed to send mention notifications for comment %s", comment.id)
 
     @staticmethod
     @transaction.atomic

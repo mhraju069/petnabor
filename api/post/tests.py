@@ -463,3 +463,59 @@ class SeparateCommentsTest(PostBaseTestCase):
         self.client.force_authenticate(self.bob)
         response = self.client.get(self.comments_url, {"post_id": "not-a-uuid"})
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class CommentMentionTest(PostBaseTestCase):
+    """@mentions in comments: friends only, who can see the post; notified once."""
+
+    def setUp(self):
+        super().setUp()
+        self.carol = User.objects.create_user(
+            email="carol@test.com", username="carol", phone="10000003", password="pass",
+            first_name="Carol", is_verified=True,
+        )
+        self.dave = User.objects.create_user(
+            email="dave@test.com", username="dave", phone="10000004", password="pass",
+            first_name="Dave", is_verified=True,
+        )
+        self.post = Post.objects.create(author=self.alice, content_text="Walk time")
+        self.make_friends(self.bob, self.carol)  # bob's friend
+        self.url = reverse("comment-list")
+
+    def _comment(self, mention_ids, text="Look @Carol"):
+        self.client.force_authenticate(self.bob)
+        return self.client.post(
+            self.url,
+            {"post": str(self.post.id), "comment_text": text, "mention_ids": [str(i) for i in mention_ids]},
+            format="json",
+        )
+
+    def test_friend_is_tagged_and_notified(self):
+        from unittest.mock import patch
+
+        with patch("api.notifications.services.send_notification") as notify:
+            response = self._comment([self.carol.id])
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual([str(m["id"]) for m in response.data["mentions"]], [str(self.carol.id)])
+        mention_calls = [c for c in notify.call_args_list if c.kwargs.get("notification_type") == "post_mention"]
+        self.assertEqual(len(mention_calls), 1)
+        self.assertEqual(mention_calls[0].kwargs["user_ids"], [str(self.carol.id)])
+        self.assertIn("mentioned you in a comment", mention_calls[0].kwargs["body"])
+
+    def test_non_friends_are_dropped(self):
+        response = self._comment([self.dave.id, self.carol.id])
+        self.assertEqual([str(m["id"]) for m in response.data["mentions"]], [str(self.carol.id)])
+
+    def test_friend_who_cannot_see_post_is_dropped(self):
+        self.post.privacy = PrivacyChoices.FRIENDS_ONLY
+        self.post.save(update_fields=["privacy"])
+        self.make_friends(self.alice, self.bob)  # bob may comment; carol isn't alice's friend
+        response = self._comment([self.carol.id])
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["mentions"], [])
+
+    def test_comment_list_returns_mentions(self):
+        self._comment([self.carol.id])
+        self.client.force_authenticate(self.bob)
+        response = self.client.get(self.url, {"post_id": str(self.post.id)})
+        self.assertEqual(response.data["results"][0]["mentions"][0]["first_name"], "Carol")
