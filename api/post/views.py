@@ -25,6 +25,7 @@ from drf_spectacular.utils import (
 
 
 from django.db.models import Prefetch
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 
 from .models import Post, PostComment, PostLike, SavedPost
@@ -135,7 +136,9 @@ class PostViewSet(viewsets.ModelViewSet):
         # More inclusive queryset for retrieve and other actions
         qs = Post.objects.filter(is_deleted=False)
 
-        if self.action == "retrieve":
+        # `?comments=0`: comments are loaded separately (paginated); older
+        # app versions still get them all with the post.
+        if self.action == "retrieve" and self.request.query_params.get("comments") != "0":
             recent_comments = (
                 PostComment.objects.filter(parent_comment__isnull=True)
                 .select_related("user", "user__profile")
@@ -396,6 +399,20 @@ class PostCommentViewSet(viewsets.ModelViewSet):
         ]
     )
     def list(self, request, *args, **kwargs):
+        # Only one post's comments, and only if you may see that post
+        # (same privacy/block rules as the post). Without this, comments on
+        # friends-only/private posts — or every comment — were listable.
+        post_id = request.query_params.get("post_id")
+        if not post_id:
+            return Response(
+                {"detail": "post_id is required."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            post = Post.objects.select_related("author").get(id=post_id, is_deleted=False)
+        except (Post.DoesNotExist, ValueError, DjangoValidationError):
+            return Response({"detail": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not CanViewPost().has_object_permission(request, self, post):
+            return Response({"detail": "Post not found."}, status=status.HTTP_404_NOT_FOUND)
         return super().list(request, *args, **kwargs)
 
     def get_queryset(self):

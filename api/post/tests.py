@@ -417,3 +417,49 @@ class DeletedPostDetailTest(PostBaseTestCase):
 
         Post.objects.filter(pk=post.pk).update(is_deleted=True)
         self.assertEqual(self.client.get(url).status_code, status.HTTP_404_NOT_FOUND)
+
+
+class SeparateCommentsTest(PostBaseTestCase):
+    """Post detail without comments (?comments=0) + the paginated comment list."""
+
+    def setUp(self):
+        super().setUp()
+        self.post = Post.objects.create(author=self.alice, content_text="Hello")
+        for i in range(25):
+            PostComment.objects.create(post=self.post, user=self.bob, comment_text=f"c{i}")
+        self.detail_url = reverse("post-detail", kwargs={"pk": self.post.id})
+        self.comments_url = reverse("comment-list")
+
+    def test_detail_skips_comments_when_asked(self):
+        self.client.force_authenticate(self.bob)
+        fast = self.client.get(self.detail_url, {"comments": "0"})
+        self.assertEqual(fast.status_code, status.HTTP_200_OK)
+        self.assertEqual(fast.data["recent_comments"], [])
+        # Older app versions (no flag) still get them.
+        full = self.client.get(self.detail_url)
+        self.assertEqual(len(full.data["recent_comments"]), 25)
+
+    def test_comments_are_paginated_newest_first(self):
+        self.client.force_authenticate(self.bob)
+        page = self.client.get(self.comments_url, {"post_id": str(self.post.id)})
+        self.assertEqual(page.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(page.data["results"]), 20)
+        self.assertEqual(page.data["results"][0]["comment_text"], "c24")
+        self.assertIsNotNone(page.data["next"])
+
+    def test_post_id_required(self):
+        self.client.force_authenticate(self.bob)
+        response = self.client.get(self.comments_url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_private_post_comments_hidden(self):
+        self.post.privacy = PrivacyChoices.PRIVATE
+        self.post.save(update_fields=["privacy"])
+        self.client.force_authenticate(self.bob)
+        response = self.client.get(self.comments_url, {"post_id": str(self.post.id)})
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unknown_post(self):
+        self.client.force_authenticate(self.bob)
+        response = self.client.get(self.comments_url, {"post_id": "not-a-uuid"})
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

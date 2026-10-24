@@ -179,6 +179,11 @@ class PostDetailSerializer(PostListSerializer):
         fields = PostListSerializer.Meta.fields + ['recent_comments']
 
     def get_recent_comments(self, obj):
+        # `?comments=0`: the app loads comments separately (paginated, from
+        # /post/comments/?post_id=…), so the post itself comes back fast.
+        request = self.context.get('request')
+        if request is not None and request.query_params.get('comments') == '0':
+            return []
         # ViewSet sets `recent_comments_qs` via Prefetch — no extra DB hit
         if hasattr(obj, 'recent_comments_qs'):
             comments = obj.recent_comments_qs
