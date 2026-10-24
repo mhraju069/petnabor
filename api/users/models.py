@@ -51,7 +51,7 @@ class CustomUserManager(BaseUserManager):
 class UserTypes(models.TextChoices):
     # Member roles users pick themselves (see users/roles.py).
     PET_PARENT = "petparent", "Pet Parent"
-    PET_SITTER = "petsitter", "Pet Sitter"
+    PET_PAL = "petpal", "PetPal"
     # Staff-assigned only.
     VENDOR = "vendor", "Vendor"
     ADMIN = "admin", "Admin"

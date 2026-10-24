@@ -1,8 +1,8 @@
 """
-Fill the app with realistic demo activity: pet parents and pet sitters with
+Fill the app with realistic demo activity: pet parents and PetPals with
 photos, their pets, posts with real pet pictures, likes, comments,
 friendships and a few stories — all placed around a location you choose so
-they show up on the map, in "Pet sitters near you" and in the feed.
+they show up on the map, in "PetPals near you" and in the feed.
 
     python manage.py seed_demo_content --lat 40.7128 --lng -74.0060 --city "New York" --state NY
     python manage.py seed_demo_content --befriend you@example.com,teammate@example.com
@@ -49,7 +49,7 @@ PEOPLE = [
      "Golden retriever mom 🐾 Weekend hiker, coffee addict, always up for a park playdate.",
      [("Bailey", "Dog", "Golden Retriever", "dog:retriever/golden", "female", date(2021, 4, 12), "Large", 29,
        ["friendly_with_dogs", "good_with_kids", "playful", "house_trained"])]),
-    ("Jamal", "Carter", "petsitter", "men", 80,
+    ("Jamal", "Carter", "petpal", "men", 80,
      "Certified pet sitter • 6 years experience • dog walks, drop-ins & overnight stays. Pet first aid trained.",
      [("Rocky", "Dog", "German Shepherd", "dog:germanshepherd", "male", date(2019, 9, 3), "Large", 34,
        ["leash_trained", "calm", "house_trained"])]),
@@ -59,7 +59,7 @@ PEOPLE = [
        ["calm", "friendly_with_dogs", "house_trained"]),
       ("Milo", "Dog", "Beagle", "dog:beagle", "male", date(2022, 6, 1), "Medium", 11,
        ["playful", "energetic", "friendly_with_cats"])]),
-    ("Noah", "Kim", "petsitter", "men", 90,
+    ("Noah", "Kim", "petpal", "men", 90,
      "Student & part-time pet sitter. Cats, small dogs and bunnies welcome. Flexible evenings & weekends.",
      []),
     ("Ava", "Thompson", "petparent", "women", 36,
@@ -70,7 +70,7 @@ PEOPLE = [
      "Trail runner with a very talkative husky. Early-morning park crew ☀️",
      [("Koda", "Dog", "Siberian Husky", "dog:husky", "male", date(2020, 12, 8), "Large", 24,
        ["energetic", "friendly_with_dogs", "leash_trained"])]),
-    ("Sophia", "Patel", "petsitter", "women", 99,
+    ("Sophia", "Patel", "petpal", "women", 99,
      "Vet tech by day, pet sitter by heart 💛 Medication-friendly care for seniors and special-needs pets.",
      [("Chai", "Cat", "Siamese", "cat:siam", "female", date(2018, 5, 25), "Medium", 4,
        ["calm", "shy", "house_trained"])]),
@@ -82,7 +82,7 @@ PEOPLE = [
      "Poodle mom & groomer in training ✂️ Ask me anything about doodles and poodles!",
      [("Daisy", "Dog", "Standard Poodle", "dog:poodle/standard", "female", date(2021, 8, 30), "Large", 22,
        ["good_with_kids", "calm", "leash_trained", "house_trained"])]),
-    ("Lucas", "Bennett", "petsitter", "men", 46,
+    ("Lucas", "Bennett", "petpal", "men", 46,
      "Dog walker in the neighborhood — group walks every weekday. Big dogs are my favorite.",
      [("Bear", "Dog", "Labrador Retriever", "dog:labrador", "male", date(2018, 1, 9), "Large", 33,
        ["friendly_with_dogs", "good_with_kids", "calm"])]),
@@ -100,7 +100,7 @@ PEOPLE = [
      "Shiba owner = professional negotiator. Love sunset walks by the river.",
      [("Kenji", "Dog", "Shiba Inu", "dog:shiba", "male", date(2021, 1, 22), "Medium", 10,
        ["energetic", "leash_trained"])]),
-    ("Daniel", "Foster", "petsitter", "men", 83,
+    ("Daniel", "Foster", "petpal", "men", 83,
      "Retired teacher, now full-time pet sitter. House sitting and long walks. References on request.",
      [("Ziggy", "Dog", "Dachshund", "dog:dachshund", "male", date(2017, 4, 16), "Small", 9,
        ["calm", "house_trained", "good_with_kids"])]),
@@ -284,7 +284,7 @@ class Command(BaseCommand):
                     first_name=first,
                     last_name=last,
                     user_type=role,
-                    is_petpal=role == "petsitter",
+                    is_petpal=role == "petpal",
                     is_verified=True,
                     is_email_verified=True,
                     agree_to_terms_and_conditions=True,
@@ -375,7 +375,7 @@ class Command(BaseCommand):
                 for pet, img_key in user_pets:
                     pool = random.sample(POST_CAPTIONS[pet.pet_type], k=2)
                     captions += [(c.format(pet=pet.pet_name), img_key, pet.pet_name) for c in pool]
-            if user.user_type == "petsitter":
+            if user.user_type == "petpal":
                 captions += [(c, "dog:retriever/golden", "walk") for c in random.sample(SITTER_CAPTIONS, k=2)]
 
             for text, img_key, label in captions:

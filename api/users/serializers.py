@@ -295,7 +295,7 @@ class UserSerializer(serializers.ModelSerializer):
         if role not in MEMBER_ROLES or (current and current not in MEMBER_ROLES):
             # Blocks self-promotion to vendor/admin and self-demotion from them.
             raise serializers.ValidationError(
-                "You can only switch between Pet Parent and Pet Sitter."
+                "You can only switch between Pet Parent and PetPal."
             )
         return role
 

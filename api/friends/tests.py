@@ -23,7 +23,7 @@ class FriendsAPITestCase(TestCase):
             password="testpassword",
             first_name="User", 
             last_name="One",
-            user_type=UserTypes.PET_SITTER
+            user_type=UserTypes.PET_PAL
         )
         self.user2 = User.objects.create_user(
             email="user2@example.com", 
@@ -32,7 +32,7 @@ class FriendsAPITestCase(TestCase):
             password="testpassword",
             first_name="User", 
             last_name="Two",
-            user_type=UserTypes.PET_SITTER
+            user_type=UserTypes.PET_PAL
         )
         self.user3 = User.objects.create_user(
             email="user3@example.com", 
@@ -50,7 +50,7 @@ class FriendsAPITestCase(TestCase):
             password="testpassword",
             first_name="User", 
             last_name="Four",
-            user_type=UserTypes.PET_SITTER
+            user_type=UserTypes.PET_PAL
         )
         
         for user in [self.user1, self.user2, self.user3, self.user4]:
@@ -190,12 +190,13 @@ class FriendsAPITestCase(TestCase):
         
         # radius=1 means 1km. All users are at Point(0,0) so all are in range.
         # include_friends=true by default. The searcher (user1) is never listed.
-        # user2(sitter), user4(sitter) → 2 results ("petpal" is the legacy name)
-        response = self.client.get(url + '?type=petpal&radius=1')
+        # user2(petpal), user4(petpal) → 2 results. Sent as the legacy
+        # "petsitter" (older app builds), which still maps to petpal.
+        response = self.client.get(url + '?type=petsitter&radius=1')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         usernames = {u['username'] for u in response.data['results']}
         self.assertEqual(usernames, {'user2', 'user4'})
-        # New fields for the "Find Pet Sitters" cards.
+        # New fields for the "Find PetPals" cards.
         first = response.data['results'][0]
         self.assertIn('city', first)
         self.assertIn('is_friend', first)
@@ -335,7 +336,7 @@ class FriendsAPITestCase(TestCase):
         # Create a 5th user
         user5 = User.objects.create_user(
             email="user5@example.com", username="user5", phone="555555555", password="test",
-            first_name="User", last_name="Five", user_type=UserTypes.PET_SITTER
+            first_name="User", last_name="Five", user_type=UserTypes.PET_PAL
         )
         Profile.objects.update_or_create(user=user5, defaults={'location_point': Point(0.0, 0.0)})
         
@@ -369,7 +370,7 @@ class FriendsAPITestCase(TestCase):
 
 
 class NewNearbyCountTest(TestCase):
-    """Pet Sitters tab badge: sitters who joined near me since my last visit."""
+    """PetPals tab badge: sitters who joined near me since my last visit."""
 
     def _user(self, name, user_type, point):
         from api.users.models import Profile
@@ -391,17 +392,17 @@ class NewNearbyCountTest(TestCase):
         self.client.force_authenticate(me)
         url = reverse("nearby-new-count")
 
-        first = self.client.get(url, {"type": "petsitter"})
+        first = self.client.get(url, {"type": "petpal"})
         self.assertEqual(first.data["count"], 0)
         since = first.data["now"]
 
-        old = self._user("oldsitter", "petsitter", Point(0.0, 0.0))
+        old = self._user("oldsitter", "petpal", Point(0.0, 0.0))
         User.objects.filter(pk=old.pk).update(date_joined=timezone.now() - timedelta(days=3))
-        self._user("newsitter", "petsitter", Point(0.0, 0.0))
+        self._user("newsitter", "petpal", Point(0.0, 0.0))
         self._user("newparent", "petparent", Point(0.0, 0.0))
-        self._user("farsitter", "petsitter", Point(10.0, 10.0))  # ~1,500 km away
+        self._user("farsitter", "petpal", Point(10.0, 10.0))  # ~1,500 km away
 
-        response = self.client.get(url, {"type": "petsitter", "since": since})
+        response = self.client.get(url, {"type": "petpal", "since": since})
         self.assertEqual(response.data["count"], 1)
 
     def test_zero_without_a_location(self):
@@ -414,6 +415,6 @@ class NewNearbyCountTest(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(me)
         response = self.client.get(
-            reverse("nearby-new-count"), {"type": "petsitter", "since": "2020-01-01T00:00:00Z"}
+            reverse("nearby-new-count"), {"type": "petpal", "since": "2020-01-01T00:00:00Z"}
         )
         self.assertEqual(response.data["count"], 0)

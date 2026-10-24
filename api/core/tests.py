@@ -232,7 +232,7 @@ class SitterEventsTests(TestCase):
         return bcast
 
     def test_sitter_location_announces(self):
-        self._set_location(self._user("sit1", "petsitter")).assert_called_once_with("sitters.new")
+        self._set_location(self._user("sit1", "petpal")).assert_called_once_with("sitters.new")
 
     def test_parent_location_does_not(self):
         self._set_location(self._user("par1", "petparent")).assert_not_called()
@@ -241,7 +241,7 @@ class SitterEventsTests(TestCase):
         user = self._user("switch1", "petparent")
         self._set_location(user)
         with patch("api.core.realtime.broadcast") as bcast, self.captureOnCommitCallbacks(execute=True):
-            user.user_type = "petsitter"
+            user.user_type = "petpal"
             user.save()
         bcast.assert_called_once_with("sitters.new")
 

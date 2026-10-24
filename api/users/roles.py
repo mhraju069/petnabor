@@ -1,24 +1,25 @@
 """
-Member roles a user can choose for themselves: Pet Parent and Pet Sitter.
+Member roles a user can choose for themselves: Pet Parent and PetPal.
 
 `vendor` and `admin` are also user types, but they grant access to vendor
 endpoints, so users must never be able to set them on their own account.
 
-Older app builds send the previous names (petnabor / petpal, and the even
-older patnabor / patpal typos); they are accepted and mapped to the new ones.
+Older app builds send previous names (petsitter; petnabor; and the even
+older patnabor / patpal typos); they are accepted and mapped to the current
+ones.
 """
 
 from rest_framework import serializers
 
 from .models import UserTypes
 
-MEMBER_ROLES = (UserTypes.PET_PARENT, UserTypes.PET_SITTER)
+MEMBER_ROLES = (UserTypes.PET_PARENT, UserTypes.PET_PAL)
 
 LEGACY_ROLE_ALIASES = {
+    "petsitter": UserTypes.PET_PAL,
+    "patpal": UserTypes.PET_PAL,
     "petnabor": UserTypes.PET_PARENT,
     "patnabor": UserTypes.PET_PARENT,
-    "petpal": UserTypes.PET_SITTER,
-    "patpal": UserTypes.PET_SITTER,
 }
 
 
@@ -41,7 +42,7 @@ def validate_member_role(value):
 
 
 class MemberRoleField(serializers.CharField):
-    """A user_type input that only accepts Pet Parent / Pet Sitter."""
+    """A user_type input that only accepts Pet Parent / PetPal."""
 
     def to_internal_value(self, data):
         return validate_member_role(super().to_internal_value(data))

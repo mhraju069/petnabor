@@ -322,7 +322,7 @@ class BlockUserView(views.APIView):
                 location=OpenApiParameter.QUERY,
                 description="Filter friends by user group.",
                 required=False,
-                enum=["petsitters", "petparents"],
+                enum=["petpals", "petparents"],
             ),
             OpenApiParameter(
                 name="page",
@@ -372,7 +372,7 @@ class FriendListView(generics.ListAPIView):
                 | Q(receiver=user, sender_id__in=exclude_ids)
             )
 
-        # 'petsitters' or 'petparents' (legacy 'petpals' / 'petnabors' still work)
+        # 'petpals' or 'petparents' (legacy 'petsitters' / 'petnabors' still work)
         friend_type = self.request.query_params.get("type")
         if friend_type:
             role = normalize_role(friend_type.rstrip("s"))
@@ -388,10 +388,10 @@ class FriendListView(generics.ListAPIView):
 
 class NewNearbyCountView(views.APIView):
     """
-    GET /friends/nearby/new-count/?type=petsitter&radius=<km>&since=…
+    GET /friends/nearby/new-count/?type=petpal&radius=<km>&since=…
 
     People of that role who joined within the radius since `since` (the
-    Pet Sitters tab badge). 0 without `since` or without a saved location.
+    PetPals tab badge). 0 without `since` or without a saved location.
     """
 
     permission_classes = [IsAuthenticated]
@@ -420,7 +420,7 @@ class NewNearbyCountView(views.APIView):
         radius = user_filter.get_radius() if request.query_params.get("radius") else 8.05
         qs = services.get_nearby_users(
             request.user,
-            user_type=user_filter.get_user_type() or "petsitter",
+            user_type=user_filter.get_user_type() or "petpal",
             # No "everywhere" for a "near me" badge.
             radius=radius or 8.05,
         ).filter(date_joined__gt=since).order_by()
@@ -445,7 +445,7 @@ class UserSearchView(views.APIView):
                 location=OpenApiParameter.QUERY,
                 description="User type filter.",
                 required=False,
-                enum=["petsitter", "petparent"],
+                enum=["petpal", "petparent"],
             ),
             OpenApiParameter(
                 name="radius",

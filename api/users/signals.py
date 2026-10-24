@@ -78,7 +78,7 @@ def _sitter_location_changed(sender, instance, created, raw=False, **kwargs):
     old = getattr(instance, "_old_location", None)
     if old is not None and old.equals(instance.location_point):
         return
-    if getattr(instance.user, "user_type", None) == "petsitter":
+    if getattr(instance.user, "user_type", None) == "petpal":
         _announce_sitters()
 
 
@@ -97,8 +97,8 @@ def _became_sitter(sender, instance, created, raw=False, **kwargs):
     if (
         raw
         or not getattr(instance, "_role_may_change", True)
-        or instance.user_type != "petsitter"
-        or getattr(instance, "_old_user_type", None) == "petsitter"
+        or instance.user_type != "petpal"
+        or getattr(instance, "_old_user_type", None) == "petpal"
     ):
         return
     profile = Profile.objects.filter(user=instance).only("location_point").first()

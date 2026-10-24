@@ -1,5 +1,5 @@
 """
-Tests for member roles (Pet Parent / Pet Sitter): defaults, legacy aliases,
+Tests for member roles (Pet Parent / PetPal): defaults, legacy aliases,
 and that users can't give themselves the vendor/admin user types.
 """
 
@@ -36,8 +36,10 @@ class RoleHelperTests(TestCase):
         for legacy, expected in [
             ("petnabor", "petparent"),
             ("patnabor", "petparent"),
-            ("petpal", "petsitter"),
-            ("PatPal", "petsitter"),
+            ("petsitter", "petpal"),
+            ("PetSitter", "petpal"),
+            ("PatPal", "petpal"),
+            ("petpal", "petpal"),
             ("petparent", "petparent"),
         ]:
             self.assertEqual(normalize_role(legacy), expected)
@@ -71,15 +73,16 @@ class SignupRoleTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(self._created_type(response), UserTypes.PET_PARENT)
 
-    def test_accepts_pet_sitter(self, _mock):
-        response = self._signup(user_type="petsitter")
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(self._created_type(response), UserTypes.PET_SITTER)
-
-    def test_maps_legacy_value(self, _mock):
+    def test_accepts_pet_pal(self, _mock):
         response = self._signup(user_type="petpal")
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(self._created_type(response), UserTypes.PET_SITTER)
+        self.assertEqual(self._created_type(response), UserTypes.PET_PAL)
+
+    def test_maps_legacy_value(self, _mock):
+        # Older app builds still send "petsitter".
+        response = self._signup(user_type="petsitter")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(self._created_type(response), UserTypes.PET_PAL)
 
     def test_rejects_vendor_and_admin(self, _mock):
         for value in ["vendor", "admin"]:
@@ -95,18 +98,18 @@ class UserTypeUpdateTests(APITestCase):
     def test_member_can_switch_role(self):
         user = _verified_user()
         self.client.force_authenticate(user)
-        response = self.client.patch(self.url, {"user_type": "petsitter"})
+        response = self.client.patch(self.url, {"user_type": "petpal"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         user.refresh_from_db()
-        self.assertEqual(user.user_type, UserTypes.PET_SITTER)
+        self.assertEqual(user.user_type, UserTypes.PET_PAL)
 
     def test_legacy_value_is_normalised(self):
         user = _verified_user()
         self.client.force_authenticate(user)
-        response = self.client.patch(self.url, {"user_type": "petpal"})
+        response = self.client.patch(self.url, {"user_type": "petsitter"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         user.refresh_from_db()
-        self.assertEqual(user.user_type, UserTypes.PET_SITTER)
+        self.assertEqual(user.user_type, UserTypes.PET_PAL)
 
     def test_member_cannot_become_vendor_or_admin(self):
         user = _verified_user()

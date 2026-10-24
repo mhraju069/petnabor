@@ -143,7 +143,7 @@ class UserAdmin(UUIDSearchMixin, UnfoldModelAdmin):
         description=_("User Type"),
         label={
             "Pet Parent": "info",
-            "Pet Sitter": "success",
+            "PetPal": "success",
             "Vendor": "warning",
             "Admin": "danger",
             "vendor": "warning",

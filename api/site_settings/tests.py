@@ -26,7 +26,7 @@ class SeedDemoContentTest(TestCase):
         self.assertGreaterEqual(demo.count(), 10)
         self.assertFalse(any(u.has_usable_password() for u in demo))
         self.assertTrue(all(u.profile.location_point for u in demo))
-        self.assertTrue(demo.filter(user_type="petsitter").exists())
+        self.assertTrue(demo.filter(user_type="petpal").exists())
         self.assertGreater(PetProfile.objects.filter(user__in=demo).count(), 10)
         self.assertGreater(Post.objects.filter(author__in=demo).count(), 20)
         self.assertTrue(PostLike.objects.exists())
