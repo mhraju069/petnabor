@@ -91,6 +91,21 @@ INSTALLED_APPS = [
 # Child Safety Standards). A monitored inbox; a dedicated one is best.
 CHILD_SAFETY_EMAIL = os.getenv("CHILD_SAFETY_EMAIL", "support@petnabor.com")
 
+# ── App links (shared post links open the app) ────────────────────────────
+# Served at /.well-known/ (api/core/app_links.py). iOS: Team ID + bundle id.
+# Android: SHA-256 fingerprints of the signing certificates, comma-separated
+# — Play Console → Test and release → App integrity → App signing (the
+# "App signing key" one, plus the upload key's for sideloaded builds).
+IOS_APP_ID = os.getenv("IOS_APP_ID", "7WQ499M9V8.com.petnabor.petnabor")
+ANDROID_PACKAGE = os.getenv("ANDROID_PACKAGE", "com.petnabor.petnabor")
+ANDROID_CERT_FINGERPRINTS = [
+    f.strip() for f in os.getenv("ANDROID_CERT_FINGERPRINTS", "").split(",") if f.strip()
+]
+APP_STORE_URL = os.getenv("APP_STORE_URL", "")
+PLAY_STORE_URL = os.getenv(
+    "PLAY_STORE_URL", "https://play.google.com/store/apps/details?id=com.petnabor.petnabor"
+)
+
 # ── Logging ───────────────────────────────────────────────────────────────
 # Everything to the console (= `docker compose logs`, and Grafana → Loki).
 # Without this, Django in production (DEBUG=False) printed no tracebacks at

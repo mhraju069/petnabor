@@ -11,7 +11,9 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from api.core.app_links import android_asset_links, apple_app_site_association
 from api.core.metrics import metrics_view
+from api.post.web_share import post_share_page
 from api.users import web_account_deletion
 from api.users.child_safety import child_safety_standards
 
@@ -29,6 +31,10 @@ urlpatterns = [
         web_account_deletion.confirm_deletion,
         name="web-delete-account-confirm",
     ),
+    # Shared post links: open the app (app links), else a web preview.
+    path(".well-known/apple-app-site-association", apple_app_site_association),
+    path(".well-known/assetlinks.json", android_asset_links),
+    re_path(r"^post/(?P<post_id>[0-9a-fA-F-]{36})/?$", post_share_page, name="post-share"),
     # OpenAPI Schema Generation
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/swagger/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),

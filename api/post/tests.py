@@ -519,3 +519,39 @@ class CommentMentionTest(PostBaseTestCase):
         self.client.force_authenticate(self.bob)
         response = self.client.get(self.url, {"post_id": str(self.post.id)})
         self.assertEqual(response.data["results"][0]["mentions"][0]["first_name"], "Carol")
+
+
+class SharedPostLinkTests(PostBaseTestCase):
+    """Shared post links: /post/<id> web page and the app-link files."""
+
+    def setUp(self):
+        super().setUp()
+        self.alice.first_name = "Alice"
+        self.alice.save(update_fields=["first_name"])
+        self.post = Post.objects.create(author=self.alice, content_text="Walkies at the park")
+
+    def test_public_post_shows_preview(self):
+        response = self.client.get(f"/post/{self.post.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Walkies at the park")
+        self.assertContains(response, f"petnabor://post/{self.post.id}")
+
+    def test_friends_only_post_hides_preview(self):
+        self.post.privacy = PrivacyChoices.FRIENDS_ONLY
+        self.post.save(update_fields=["privacy"])
+        response = self.client.get(f"/post/{self.post.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Walkies at the park")
+        self.assertContains(response, "Open in PetNabor")
+
+    def test_deactivated_author_hides_preview(self):
+        self.alice.is_deactivated = True
+        self.alice.save(update_fields=["is_deactivated"])
+        response = self.client.get(f"/post/{self.post.id}")
+        self.assertNotContains(response, "Walkies at the park")
+
+    def test_app_link_files(self):
+        aasa = self.client.get("/.well-known/apple-app-site-association").json()
+        self.assertEqual(aasa["applinks"]["details"][0]["components"], [{"/": "/post/*"}])
+        links = self.client.get("/.well-known/assetlinks.json").json()
+        self.assertEqual(links[0]["target"]["package_name"], "com.petnabor.petnabor")
