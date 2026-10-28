@@ -260,9 +260,11 @@ def other_user_status(user, thread):
 def post_block_event(actor, other, event):
     """
     Record "blocked" / "unblocked" in the DIRECT chat between `actor` and
-    `other` (if they have one): a SYSTEM message the app shows as a small
-    centered line ("You blocked Sam" / "Sam blocked you"). Not unread, no
-    push, inbox preview untouched. Sent live to both. Returns the message.
+    `other`, only if they've actually talked there (an empty or never-used
+    chat gets nothing): a SYSTEM message the app shows as a small centered
+    line ("You blocked Sam" / "Sam blocked you"). Silent: never a push
+    notification, not unread, inbox preview untouched; only shown live to
+    whoever has the chat open. Returns the message, or None.
     """
     thread = (
         ChatThread.objects.filter(thread_type=ThreadTypes.DIRECT, participants__user=actor)
@@ -270,6 +272,13 @@ def post_block_event(actor, other, event):
         .first()
     )
     if thread is None:
+        return None
+    has_conversation = (
+        Message.objects.filter(thread=thread, is_deleted_for_everyone=False)
+        .exclude(message_type=MessageTypes.SYSTEM)
+        .exists()
+    )
+    if not has_conversation:
         return None
 
     actor_name = actor.first_name or actor.username or "Someone"

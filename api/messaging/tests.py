@@ -908,6 +908,9 @@ class BlockEventMessageTest(MessagingBaseTestCase):
         self.client.force_authenticate(self.alice)
         self.block_url = reverse("block-user")
 
+    def _talk(self):
+        Message.objects.create(thread=self.thread, sender=self.bob, text_content="Hi!")
+
     def _events(self):
         return list(
             Message.objects.filter(thread=self.thread, message_type=MessageTypes.SYSTEM)
@@ -916,6 +919,7 @@ class BlockEventMessageTest(MessagingBaseTestCase):
         )
 
     def test_block_and_unblock_are_recorded(self):
+        self._talk()
         self.client.post(self.block_url, {"user_id": str(self.bob.id)}, format="json")
         self.client.post(self.block_url, {"user_id": str(self.bob.id)}, format="json")  # again
         self.client.delete(self.block_url, {"user_id": str(self.bob.id)}, format="json")
@@ -926,6 +930,21 @@ class BlockEventMessageTest(MessagingBaseTestCase):
         self.assertEqual(event.metadata["actor_id"], str(self.alice.id))
         self.thread.refresh_from_db()
         self.assertIsNone(self.thread.last_message_text)  # inbox preview untouched
+
+    def test_empty_chat_gets_nothing(self):
+        # A chat that was opened but never used (e.g. not friends, no messages).
+        self.client.post(self.block_url, {"user_id": str(self.bob.id)}, format="json")
+        self.client.delete(self.block_url, {"user_id": str(self.bob.id)}, format="json")
+        self.assertEqual(self._events(), [])
+
+    @patch("api.friends.services.send_notification")
+    @patch("api.messaging.tasks.notify_new_message")
+    def test_block_is_silent(self, notify_message, send_notification):
+        self._talk()
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(self.block_url, {"user_id": str(self.bob.id)}, format="json")
+        notify_message.delay.assert_not_called()
+        send_notification.assert_not_called()
 
     def test_no_chat_no_event(self):
         self.client.post(self.block_url, {"user_id": str(self.carol.id)}, format="json")
