@@ -249,7 +249,7 @@ def get_nearby_users(
 
     users_query = (
         User.objects.select_related("profile")
-        .filter(is_active=True)
+        .filter(is_active=True, is_deactivated=False)
         .exclude(id__in=exclude_ids)
         # Never list the searcher in their own results.
         .exclude(id=current_user.id)
@@ -308,7 +308,7 @@ def get_suggested_friends(current_user, limit=20):
 
     # 2. Base Queryset (select_related fixes N+1 query)
     users_query = User.objects.select_related("profile").filter(
-        is_active=True
+        is_active=True, is_deactivated=False
     ).exclude(
         Q(id__in=blocked_ids) |
         Q(id__in=blocked_by_ids) |

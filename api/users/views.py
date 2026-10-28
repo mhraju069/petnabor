@@ -171,6 +171,8 @@ class LoginView(APIView):
                 "data": {
                     "access_token": tokens["access"],
                     "refresh_token": tokens["refresh"],
+                    # True when signing in turned a deactivated account back on.
+                    "reactivated": bool(getattr(user, "was_reactivated", False)),
                     "user": _build_user_data(user),
                 },
             },
@@ -469,9 +471,39 @@ class FirebaseLoginView(APIView):
                 "data": {
                     "access_token": tokens["access"],
                     "refresh_token": tokens["refresh"],
+                    # True when signing in turned a deactivated account back on.
+                    "reactivated": bool(getattr(user, "was_reactivated", False)),
                     "user": _build_user_data(user),
                 },
                 "is_new_user": is_new_user,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class DeactivateAccountView(APIView):
+    """
+    POST /users/user/deactivate/ — pause the account: hidden from everyone
+    until the user signs in again. Nothing is deleted.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        request=None,
+        responses={200: inline_serializer(
+            name="DeactivateAccountResponse",
+            fields={"success": serializers.BooleanField(), "message": serializers.CharField()},
+        )},
+        tags=["Users"],
+    )
+    def post(self, request):
+        from .account_status import deactivate_account
+
+        deactivate_account(request.user)
+        return Response(
+            {
+                "success": True,
+                "message": "Your account is deactivated. Log in again anytime to turn it back on.",
             },
             status=status.HTTP_200_OK,
         )

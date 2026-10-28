@@ -120,6 +120,10 @@ def can_message(sender, recipient):
 
     Result cached in Redis for PERMISSION_CACHE_TTL seconds.
     """
+    # Deactivated accounts can't be messaged (not cached: it changes on login).
+    if getattr(recipient, "is_deactivated", False):
+        return False
+
     cache_key = _permission_cache_key(sender.id, recipient.id)
     cached = cache.get(cache_key)
     if cached is not None:

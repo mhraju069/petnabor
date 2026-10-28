@@ -149,6 +149,8 @@ class PostService:
 
         if user == request_user:
             pass  # owner sees all own posts
+        elif getattr(user, "is_deactivated", False):
+            return Post.objects.none()  # deactivated: hidden from others
         else:
             # If blocked in either direction, no posts visible
             from api.friends.services import is_blocked as _is_blocked
@@ -272,7 +274,7 @@ class FeedService:
         qs = Post.objects.filter(
             visibility_filter,
             is_deleted=False,
-        ).exclude(author_id__in=flat_blocked)
+        ).exclude(author_id__in=flat_blocked).exclude(author__is_deactivated=True)
 
         return (
             qs.select_related("author", "author__profile")

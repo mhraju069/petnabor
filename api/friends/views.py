@@ -353,6 +353,8 @@ class FriendListView(generics.ListAPIView):
         queryset = (
             Friendship.objects.select_related("sender__profile", "receiver__profile")
             .filter(Q(sender=user) | Q(receiver=user))
+            # Deactivated friends are hidden until they come back.
+            .exclude(Q(sender=user, receiver__is_deactivated=True) | Q(receiver=user, sender__is_deactivated=True))
             .order_by("-created_at")
         )
 
@@ -542,7 +544,9 @@ class PublicUserDetailsView(views.APIView):
     )
     def get(self, request, user_id):
         try:
-            target_user = get_user_model().objects.select_related('profile').get(id=user_id, is_active=True)
+            target_user = get_user_model().objects.select_related('profile').get(
+                id=user_id, is_active=True, is_deactivated=False
+            )
         except (get_user_model().DoesNotExist, ValidationError):
             raise NotFound("User not found")
 

@@ -94,7 +94,8 @@ def send_notification(
     if actor is not None:
         data = {**actor_data(actor), **(data or {})}
 
-    users_query = User.objects.all()
+    # Deactivated accounts get no notifications until they sign back in.
+    users_query = User.objects.filter(is_deactivated=False)
 
     if broadcast:
         if filters:

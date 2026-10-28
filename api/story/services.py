@@ -106,6 +106,8 @@ class StoryService:
         if target_user == requesting_user:
             # Owner sees all their own stories
             pass
+        elif getattr(target_user, "is_deactivated", False):
+            return Story.objects.none()  # deactivated: hidden from others
         else:
             # Block check: if blocked in either direction, no stories visible
             from api.friends.services import is_blocked as _is_blocked
@@ -173,6 +175,7 @@ class StoryFeedService:
         qs = (
             StoryService.get_active_queryset()
             .exclude(author_id__in=flat_blocked)
+            .exclude(author__is_deactivated=True)
             .filter(author_id__in=friend_ids)
         )
 

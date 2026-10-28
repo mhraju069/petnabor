@@ -70,6 +70,9 @@ def user_can_view_post(user, post):
     if post.author_id == user.id:
         return True  # Owner always sees their own post
 
+    if getattr(post.author, "is_deactivated", False):
+        return False  # author deactivated their account
+
     # Block check: deny access if blocked in either direction
     if is_blocked(user, post.author):
         return False

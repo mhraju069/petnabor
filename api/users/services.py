@@ -313,6 +313,11 @@ def login_user(email_or_phone, password):
     if not user.is_verified:
         raise AccountNotVerified()
 
+    # Signing in turns a deactivated account back on.
+    from .account_status import reactivate_if_deactivated
+
+    user.was_reactivated = reactivate_if_deactivated(user)
+
     tokens = get_tokens_for_user(user)
 
     # Send login notification (async via Celery)
@@ -556,6 +561,11 @@ def firebase_login_service(
                 if user_profile:
                     user_profile.referred_by = referrer_profile.user
                     user_profile.save(update_fields=["referred_by"])
+
+    # Signing in turns a deactivated account back on.
+    from .account_status import reactivate_if_deactivated
+
+    user.was_reactivated = reactivate_if_deactivated(user)
 
     tokens = get_tokens_for_user(user)
 

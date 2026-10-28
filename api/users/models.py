@@ -85,6 +85,11 @@ class User(AbstractUser):
     is_phone_verified = models.BooleanField(default=False)
 
     is_active = models.BooleanField(default=True)
+    # Paused by the user (Settings → Deactivate account): hidden from
+    # everyone, can't be messaged; logging in again turns it back on.
+    # Different from is_active=False (staff ban: can't sign in at all).
+    is_deactivated = models.BooleanField(default=False, db_index=True)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
     is_staff = models.BooleanField(default=False)
     is_superuser = models.BooleanField(default=False)
 
