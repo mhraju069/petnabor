@@ -229,6 +229,34 @@ def create_group_thread(creator, name, description=None, avatar_url=None, member
     return thread
 
 
+def other_user_status(user, thread):
+    """
+    Why `user` can't message the other person in a DIRECT chat, or None:
+      "deactivated"     they deactivated (or were banned from) their account
+      "blocked_by_you"  `user` blocked them
+      "blocked_you"     they blocked `user`
+    The app shows this instead of the message box.
+    """
+    if thread.thread_type != ThreadTypes.DIRECT:
+        return None
+    other = (
+        ThreadParticipant.objects.filter(thread=thread)
+        .exclude(user=user)
+        .select_related("user")
+        .first()
+    )
+    if other is None:
+        return None
+    them = other.user
+    if not them.is_active or getattr(them, "is_deactivated", False):
+        return "deactivated"
+    if UserBlock.objects.filter(blocker=user, blocked_user=them).exists():
+        return "blocked_by_you"
+    if UserBlock.objects.filter(blocker=them, blocked_user=user).exists():
+        return "blocked_you"
+    return None
+
+
 def get_thread_for_participant(user, thread_id):
     """
     Fetch a ChatThread by ID, ensuring `user` is an active participant.

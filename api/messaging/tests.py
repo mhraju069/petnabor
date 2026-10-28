@@ -859,3 +859,36 @@ class RealtimeDeliveryTest(MessagingBaseTestCase):
         (user_ids, event), = self._events(broadcast, "message_deleted")
         self.assertEqual(set(user_ids), {self.alice.id, self.bob.id})
         self.assertEqual(event["message_ids"], [str(last.id)])
+
+
+class OtherUserStatusTest(MessagingBaseTestCase):
+    """Thread detail says why you can't message the other person."""
+
+    def setUp(self):
+        super().setUp()
+        self.make_friends(self.alice, self.bob)
+        self.thread = ChatThread.objects.create(thread_type=ThreadTypes.DIRECT, created_by=self.alice)
+        ThreadParticipant.objects.bulk_create([
+            ThreadParticipant(thread=self.thread, user=self.alice),
+            ThreadParticipant(thread=self.thread, user=self.bob),
+        ])
+        self.url = reverse("thread-detail", kwargs={"thread_id": self.thread.id})
+        self.client.force_authenticate(self.alice)
+
+    def _status(self):
+        return self.client.get(self.url).data["other_user_status"]
+
+    def test_none_normally(self):
+        self.assertIsNone(self._status())
+
+    def test_deactivated(self):
+        User.objects.filter(pk=self.bob.pk).update(is_deactivated=True)
+        self.assertEqual(self._status(), "deactivated")
+
+    def test_blocked_by_you(self):
+        UserBlock.objects.create(blocker=self.alice, blocked_user=self.bob)
+        self.assertEqual(self._status(), "blocked_by_you")
+
+    def test_blocked_you(self):
+        UserBlock.objects.create(blocker=self.bob, blocked_user=self.alice)
+        self.assertEqual(self._status(), "blocked_you")

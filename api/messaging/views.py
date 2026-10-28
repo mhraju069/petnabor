@@ -166,7 +166,11 @@ class ThreadDetailView(views.APIView):
     def get(self, request, thread_id):
         thread, _ = services.get_thread_for_participant(request.user, thread_id)
         serializer = ChatThreadSerializer(thread, context={"request": request})
-        return Response(serializer.data)
+        # Why you can't message them (deactivated / blocked), or null: the
+        # app shows it in place of the message box.
+        return Response(
+            {**serializer.data, "other_user_status": services.other_user_status(request.user, thread)}
+        )
 
     @extend_schema(
         parameters=[
