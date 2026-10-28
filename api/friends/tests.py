@@ -138,6 +138,16 @@ class FriendsAPITestCase(TestCase):
         req_response = self.client.post(req_url, req_data, format='json')
         self.assertEqual(req_response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_cannot_block_back(self):
+        # user2 already blocked user1: user1 can't block user2 back.
+        UserBlock.objects.create(blocker=self.user2, blocked_user=self.user1)
+        self.client.force_authenticate(user=self.user1)
+        response = self.client.post(
+            reverse('block-user'), {'user_id': str(self.user2.id)}, format='json'
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(UserBlock.objects.filter(blocker=self.user1, blocked_user=self.user2).exists())
+
     def test_unblock_user(self):
         UserBlock.objects.create(blocker=self.user1, blocked_user=self.user2)
         self.client.force_authenticate(user=self.user1)

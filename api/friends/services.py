@@ -192,6 +192,10 @@ def block_user(blocker, blocked_user_id):
     except User.DoesNotExist:
         raise NotFound("User not found")
 
+    # They already blocked you: you can't block them back.
+    if UserBlock.objects.filter(blocker=blocked_user, blocked_user=blocker).exists():
+        raise PermissionDenied("You can't block someone who has blocked you.")
+
     _, created = UserBlock.objects.get_or_create(blocker=blocker, blocked_user=blocked_user)
 
     # Invalidate messaging permission cache
