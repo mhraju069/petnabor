@@ -380,7 +380,9 @@ class NewNearbyCountTest(TestCase):
             is_verified=True, user_type=user_type,
         )
         Profile.objects.update_or_create(user=user, defaults={"location_point": point})
-        return user
+        # Fresh copy: `user.profile` is still the profile cached at signup
+        # (no location), which made the view think "no saved location".
+        return User.objects.select_related("profile").get(pk=user.pk)
 
     def test_counts_new_nearby_sitters_only(self):
         from datetime import timedelta
