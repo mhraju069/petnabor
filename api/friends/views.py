@@ -263,7 +263,12 @@ class BlockUserView(views.APIView):
         responses=UserBlockSerializer(many=True),
     )
     def get(self, request):
-        blocks = UserBlock.objects.filter(blocker=request.user).order_by('-created_at')
+        # Profiles loaded up front: each row shows the person's name/photo.
+        blocks = (
+            UserBlock.objects.filter(blocker=request.user)
+            .select_related("blocked_user__profile")
+            .order_by('-created_at')
+        )
         
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(blocks, request)
