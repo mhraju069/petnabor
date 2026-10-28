@@ -257,6 +257,62 @@ def other_user_status(user, thread):
     return None
 
 
+def post_block_event(actor, other, event):
+    """
+    Record "blocked" / "unblocked" in the DIRECT chat between `actor` and
+    `other` (if they have one): a SYSTEM message the app shows as a small
+    centered line ("You blocked Sam" / "Sam blocked you"). Not unread, no
+    push, inbox preview untouched. Sent live to both. Returns the message.
+    """
+    thread = (
+        ChatThread.objects.filter(thread_type=ThreadTypes.DIRECT, participants__user=actor)
+        .filter(participants__user=other)
+        .first()
+    )
+    if thread is None:
+        return None
+
+    actor_name = actor.first_name or actor.username or "Someone"
+    other_name = other.first_name or other.username or "someone"
+    message = Message.objects.create(
+        thread=thread,
+        sender=actor,
+        message_type=MessageTypes.SYSTEM,
+        # Plain wording for older app versions / the admin; the app builds
+        # its own text from `metadata`.
+        text_content=f"{actor_name} {event} {other_name}",
+        metadata={"event": event, "actor_id": str(actor.id), "target_id": str(other.id)},
+        is_read=True,
+    )
+
+    payload = {
+        "id": str(message.id),
+        "thread": str(thread.id),
+        "sender": {
+            "id": str(actor.id),
+            "username": actor.username,
+            "first_name": actor.first_name,
+            "last_name": actor.last_name,
+            "avatar": None,
+        },
+        "message_type": message.message_type,
+        "text_content": message.text_content,
+        "media_url": None,
+        "metadata": message.metadata,
+        "reply_to": None,
+        "is_read": True,
+        "is_edited": False,
+        "is_deleted_for_everyone": False,
+        "created_at": message.created_at.isoformat(),
+        "updated_at": message.updated_at.isoformat(),
+    }
+    participant_ids = [actor.id, other.id]
+    transaction.on_commit(
+        lambda: _broadcast(participant_ids, {"type": "chat_message", "message": payload})
+    )
+    return message
+
+
 def get_thread_for_participant(user, thread_id):
     """
     Fetch a ChatThread by ID, ensuring `user` is an active participant.

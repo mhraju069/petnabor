@@ -892,3 +892,41 @@ class OtherUserStatusTest(MessagingBaseTestCase):
     def test_blocked_you(self):
         UserBlock.objects.create(blocker=self.bob, blocked_user=self.alice)
         self.assertEqual(self._status(), "blocked_you")
+
+
+class BlockEventMessageTest(MessagingBaseTestCase):
+    """Block / unblock leave a SYSTEM line in the chat (once, not unread)."""
+
+    def setUp(self):
+        super().setUp()
+        self.make_friends(self.alice, self.bob)
+        self.thread = ChatThread.objects.create(thread_type=ThreadTypes.DIRECT, created_by=self.alice)
+        ThreadParticipant.objects.bulk_create([
+            ThreadParticipant(thread=self.thread, user=self.alice),
+            ThreadParticipant(thread=self.thread, user=self.bob),
+        ])
+        self.client.force_authenticate(self.alice)
+        self.block_url = reverse("block-user")
+
+    def _events(self):
+        return list(
+            Message.objects.filter(thread=self.thread, message_type=MessageTypes.SYSTEM)
+            .order_by("created_at")
+            .values_list("metadata__event", flat=True)
+        )
+
+    def test_block_and_unblock_are_recorded(self):
+        self.client.post(self.block_url, {"user_id": str(self.bob.id)}, format="json")
+        self.client.post(self.block_url, {"user_id": str(self.bob.id)}, format="json")  # again
+        self.client.delete(self.block_url, {"user_id": str(self.bob.id)}, format="json")
+        self.assertEqual(self._events(), ["blocked", "unblocked"])
+
+        event = Message.objects.filter(thread=self.thread, message_type=MessageTypes.SYSTEM).first()
+        self.assertTrue(event.is_read)  # no unread badge for Bob
+        self.assertEqual(event.metadata["actor_id"], str(self.alice.id))
+        self.thread.refresh_from_db()
+        self.assertIsNone(self.thread.last_message_text)  # inbox preview untouched
+
+    def test_no_chat_no_event(self):
+        self.client.post(self.block_url, {"user_id": str(self.carol.id)}, format="json")
+        self.assertFalse(Message.objects.filter(message_type=MessageTypes.SYSTEM).exists())

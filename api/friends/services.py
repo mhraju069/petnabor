@@ -13,6 +13,18 @@ from api.notifications.models import NotificationTypes
 User = get_user_model()
 
 
+def _post_block_event(actor, other, event):
+    """Chat history entry for a block/unblock (never fails the block itself)."""
+    try:
+        from api.messaging.services import post_block_event
+
+        post_block_event(actor, other, event)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("Couldn't record %s in chat", event)
+
+
 def _invalidate_message_permission(user_a_id, user_b_id):
     """Lazily import and invalidate the messaging permission cache for a user pair."""
     try:
@@ -180,10 +192,14 @@ def block_user(blocker, blocked_user_id):
     except User.DoesNotExist:
         raise NotFound("User not found")
 
-    UserBlock.objects.get_or_create(blocker=blocker, blocked_user=blocked_user)
+    _, created = UserBlock.objects.get_or_create(blocker=blocker, blocked_user=blocked_user)
 
     # Invalidate messaging permission cache
     _invalidate_message_permission(blocker.id, blocked_user.id)
+
+    # "You blocked …" in their chat (once: blocking again changes nothing).
+    if created:
+        _post_block_event(blocker, blocked_user, "blocked")
 
     # Remove friendship if exists
     Friendship.objects.filter(
@@ -207,6 +223,10 @@ def unblock_user(blocker, blocked_user_id):
         raise NotFound("Block record not found")
     # Invalidate messaging permission cache
     _invalidate_message_permission(blocker.id, blocked_user_id)
+
+    other = User.objects.filter(id=blocked_user_id).first()
+    if other is not None:
+        _post_block_event(blocker, other, "unblocked")
     return True
 
 
